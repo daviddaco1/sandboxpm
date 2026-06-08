@@ -1,0 +1,22 @@
+{
+  "name": "@sandboxpm/scripts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc --build",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@sandboxpm/config": "workspace:*",
+    "@sandboxpm/fetcher": "workspace:*",
+    "dockerode": "^4.0.0",
+    "inquirer": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/dockerode": "^3.3.29",
+    "@types/inquirer": "^9.0.7"
+  }
+}

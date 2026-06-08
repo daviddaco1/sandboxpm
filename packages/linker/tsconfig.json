@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "tsBuildInfoFile": "dist/.tsbuildinfo"
+  },
+  "references": [
+    { "path": "../config" },
+    { "path": "../store" },
+    { "path": "../resolver" },
+    { "path": "../fetcher" }
+  ],
+  "include": ["src/**/*"]
+}

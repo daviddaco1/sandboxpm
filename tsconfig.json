@@ -1,0 +1,12 @@
+{
+  "files": [],
+  "references": [
+    { "path": "./packages/config" },
+    { "path": "./packages/store" },
+    { "path": "./packages/fetcher" },
+    { "path": "./packages/resolver" },
+    { "path": "./packages/linker" },
+    { "path": "./packages/scripts" },
+    { "path": "./packages/cli" }
+  ]
+}
