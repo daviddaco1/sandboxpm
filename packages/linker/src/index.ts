@@ -167,7 +167,15 @@ export class Linker {
   private async _ensureSymlink(target: string, symlinkPath: string): Promise<void> {
     await fs.mkdir(path.dirname(symlinkPath), { recursive: true })
     try {
-      await fs.symlink(target, symlinkPath)
+      if (process.platform === 'win32') {
+        // Junctions don't require elevated privileges on Windows (unlike symlinks).
+        // Use junction for directories; file type for everything else.
+        let isDir = false
+        try { isDir = (await fs.stat(target)).isDirectory() } catch { /* target may not exist yet */ }
+        await fs.symlink(target, symlinkPath, isDir ? 'junction' : 'file')
+      } else {
+        await fs.symlink(target, symlinkPath)
+      }
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'EEXIST') return
       throw err
@@ -195,11 +203,26 @@ export class Linker {
     for (const [binName, binFile] of Object.entries(binEntries)) {
       const target = path.resolve(pkgDir, binFile)
       const symlinkPath = path.join(binDir, binName)
-      await this._ensureSymlink(target, symlinkPath)
+      try {
+        await this._ensureSymlink(target, symlinkPath)
+      } catch (err) {
+        if (process.platform === 'win32' && (err as NodeJS.ErrnoException).code === 'EPERM') {
+          // File symlinks require Developer Mode or admin on Windows; create a .cmd shim instead.
+          try {
+            await fs.writeFile(
+              `${symlinkPath}.cmd`,
+              `@node "${target.replace(/\//g, '\\')}" %*\r\n`,
+              'utf8',
+            )
+          } catch { /* non-fatal */ }
+        } else {
+          throw err
+        }
+      }
       try {
         await fs.chmod(target, 0o755)
       } catch {
-        // chmod may fail if target doesn't exist yet or on some filesystems; non-fatal
+        // chmod may fail on some systems; non-fatal
       }
       result.symlinksCreated++
     }

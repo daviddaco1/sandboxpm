@@ -1,4 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+
+// Node 24 ESM namespace properties are non-configurable; spread into a plain
+// object so vi.spyOn can replace individual methods (used in the EXDEV test).
+vi.mock('fs/promises', async () => {
+  const actual = await vi.importActual<typeof import('fs/promises')>('fs/promises')
+  return { ...actual }
+})
+
 import * as fs from 'fs/promises'
 import * as path from 'path'
 import * as os from 'os'

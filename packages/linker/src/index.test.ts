@@ -248,8 +248,11 @@ describe('Linker._linkBins — chmod +x', () => {
       projectDir, 'node_modules', '.sandboxpm', 'mycli@1.0.0', 'node_modules', 'mycli', 'bin', 'cli.js',
     )
     const stat = await fs.stat(binTarget)
-    // File should have at least one executable bit set
-    expect(stat.mode & 0o111).not.toBe(0)
+    expect(stat.isFile()).toBe(true)
+    // POSIX execute bits are not meaningful on Windows
+    if (process.platform !== 'win32') {
+      expect(stat.mode & 0o111).not.toBe(0)
+    }
   })
 })
 

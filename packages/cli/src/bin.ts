@@ -8,6 +8,7 @@ import chalk from 'chalk'
 import ora from 'ora'
 import * as path from 'path'
 import * as fs from 'fs/promises'
+import { realpathSync } from 'fs'
 import { fileURLToPath } from 'url'
 import * as semver from 'semver'
 import Dockerode from 'dockerode'
@@ -544,9 +545,19 @@ program.hook('preAction', () => {
   if (opts.color === false) chalk.level = 0
 })
 
-const isMain = process.argv[1] !== undefined &&
-  (fileURLToPath(import.meta.url) === process.argv[1] ||
-   process.argv[1].endsWith('/sandboxpm'))
+function realpath(p: string): string {
+  try { return realpathSync(p) } catch { return p }
+}
+
+const isMain = process.argv[1] !== undefined && (() => {
+  const argv1 = realpath(process.argv[1])
+  const self  = realpath(fileURLToPath(import.meta.url))
+  return argv1 === self ||
+    argv1.endsWith('/sandboxpm')  ||
+    argv1.endsWith('\\sandboxpm') ||
+    argv1.endsWith('/sandboxpm.js')  ||
+    argv1.endsWith('\\sandboxpm.js')
+})()
 
 if (isMain) {
   program.parseAsync(process.argv).catch(err => {
