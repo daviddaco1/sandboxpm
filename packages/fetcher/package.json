@@ -11,6 +11,11 @@
   },
   "dependencies": {
     "@sandboxpm/config": "workspace:*",
-    "@sandboxpm/store": "workspace:*"
+    "@sandboxpm/store": "workspace:*",
+    "p-limit": "^5.0.0",
+    "tar": "^6.2.1"
+  },
+  "devDependencies": {
+    "@types/tar": "^6.1.13"
   }
 }

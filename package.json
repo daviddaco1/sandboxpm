@@ -3,19 +3,21 @@
   "private": true,
   "version": "0.1.0",
   "description": "Secure, zero-trust package manager with content-addressable store",
-  "workspaces": [
-    "packages/*"
-  ],
+  "packageManager": "pnpm@11.2.2",
   "scripts": {
     "build": "tsc --build",
     "dev": "tsc --build --watch",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "SANDBOXPM_E2E=1 vitest run packages/cli/src/install.e2e.test.ts",
+    "test:docker": "DOCKER_INTEGRATION=1 vitest run packages/scripts/src/docker.integration.test.ts",
     "lint": "eslint packages/*/src/**/*.ts",
     "clean": "rimraf packages/*/dist packages/*/*.tsbuildinfo"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
+    "@vitest/coverage-v8": "^1.6.0",
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",
     "eslint": "^9.0.0",
