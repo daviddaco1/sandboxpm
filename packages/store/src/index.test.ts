@@ -113,6 +113,57 @@ describe('CASStore.link', () => {
 
     vi.restoreAllMocks()
   })
+
+  it('rethrows an unexpected link error that is not EEXIST/EXDEV/UNKNOWN/EPERM', async () => {
+    const filePath = await writeFile('weird-link-err.txt', 'x')
+    const hash = await hashFile(filePath)
+    await store.put(hash, filePath)
+
+    const dest = path.join(tmpDir, 'weird-dest.txt')
+    const weirdErr = Object.assign(new Error('ENOSPC'), { code: 'ENOSPC' })
+    vi.spyOn(fs, 'link').mockRejectedValueOnce(weirdErr)
+
+    await expect(store.link(hash, dest)).rejects.toThrow('ENOSPC')
+
+    vi.restoreAllMocks()
+  })
+})
+
+describe('CASStore.put — concurrent-race branches', () => {
+  it('cleans up the temp file and returns silently when it loses a concurrent put race', async () => {
+    const filePath = await writeFile('race.txt', 'race content')
+    const hash = await hashFile(filePath)
+
+    const hasSpy = vi.spyOn(store, 'has')
+      .mockResolvedValueOnce(false) // initial check: not yet in store
+      .mockResolvedValueOnce(true)  // after rename ENOENT: winner already renamed
+
+    const enoent = Object.assign(new Error('ENOENT'), { code: 'ENOENT' })
+    const renameSpy = vi.spyOn(fs, 'rename').mockRejectedValueOnce(enoent)
+    const rmSpy = vi.spyOn(fs, 'rm')
+
+    await expect(store.put(hash, filePath)).resolves.toBeUndefined()
+
+    expect(hasSpy).toHaveBeenCalledTimes(2)
+    expect(renameSpy).toHaveBeenCalled()
+    expect(rmSpy).toHaveBeenCalledWith(expect.stringContaining('.tmp.'), { force: true })
+
+    vi.restoreAllMocks()
+  })
+
+  it('rethrows a rename error that is not a lost-race ENOENT, after cleaning up the temp file', async () => {
+    const filePath = await writeFile('rename-fail.txt', 'data')
+    const hash = await hashFile(filePath)
+
+    const permErr = Object.assign(new Error('EACCES'), { code: 'EACCES' })
+    vi.spyOn(fs, 'rename').mockRejectedValueOnce(permErr)
+    const rmSpy = vi.spyOn(fs, 'rm')
+
+    await expect(store.put(hash, filePath)).rejects.toThrow('EACCES')
+    expect(rmSpy).toHaveBeenCalledWith(expect.stringContaining('.tmp.'), { force: true })
+
+    vi.restoreAllMocks()
+  })
 })
 
 describe('CASStore.verify', () => {
@@ -173,6 +224,13 @@ describe('CASStore.gc', () => {
     const freed = await store.gc(new Set())
     expect(freed).toBe(0)
   })
+
+  it('rethrows a non-ENOENT readdir error', async () => {
+    const err = Object.assign(new Error('EACCES'), { code: 'EACCES' })
+    vi.spyOn(fs, 'readdir').mockRejectedValueOnce(err)
+    await expect(store.gc(new Set())).rejects.toThrow('EACCES')
+    vi.restoreAllMocks()
+  })
 })
 
 describe('CASStore.gcByTtl', () => {
@@ -205,6 +263,13 @@ describe('CASStore.gcByTtl', () => {
     const emptyStore = new CASStore(path.join(tmpDir, 'nonexistent'))
     expect(await emptyStore.gcByTtl(7)).toBe(0)
   })
+
+  it('rethrows a non-ENOENT readdir error', async () => {
+    const err = Object.assign(new Error('EACCES'), { code: 'EACCES' })
+    vi.spyOn(fs, 'readdir').mockRejectedValueOnce(err)
+    await expect(store.gcByTtl(7)).rejects.toThrow('EACCES')
+    vi.restoreAllMocks()
+  })
 })
 
 describe('CASStore.stats', () => {
@@ -227,5 +292,12 @@ describe('CASStore.stats', () => {
     const s = await emptyStore.stats()
     expect(s.totalFiles).toBe(0)
     expect(s.totalSizeBytes).toBe(0)
+  })
+
+  it('rethrows a non-ENOENT readdir error', async () => {
+    const err = Object.assign(new Error('EACCES'), { code: 'EACCES' })
+    vi.spyOn(fs, 'readdir').mockRejectedValueOnce(err)
+    await expect(store.stats()).rejects.toThrow('EACCES')
+    vi.restoreAllMocks()
   })
 })
