@@ -1,10 +1,20 @@
 {
   "name": "@sandboxpm/linker",
   "version": "0.1.0",
-  "private": true,
+  "description": "Builds non-flat node_modules from the sandboxpm content-addressable store",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/daviddaco1/sandboxpm.git",
+    "directory": "packages/linker"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "files": ["dist", "!dist/**/*.tsbuildinfo"],
   "scripts": {
     "build": "tsc --build",
     "test": "vitest run"

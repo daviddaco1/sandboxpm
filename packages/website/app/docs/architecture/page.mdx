@@ -1,0 +1,78 @@
+export const metadata = {
+  title: 'Architecture — sandboxpm docs',
+}
+
+# Architecture
+
+sandboxpm is a pnpm workspace made of seven packages wired together in dependency order:
+
+```
+config → store → fetcher → resolver → linker → scripts → cli
+```
+
+| Package | Responsibility |
+|---|---|
+| `config` | `.sandboxpmrc` (YAML) + `~/.sandboxpm/config.json` |
+| `store` | Content-addressable store: SHA-512 keyed hard links in `~/.sandboxpm/store/` |
+| `fetcher` | Tarball download, integrity verification, extraction into the store |
+| `resolver` | Semver resolution, dependency tree, `sandboxpm.lock` |
+| `linker` | Non-flat `node_modules` built from store hard links + symlinks |
+| `scripts` | Interactive script approval + the Docker/Hyper-V sandbox runner |
+| `cli` | Commander.js entry point that orchestrates all of the above |
+
+One `CASStore`, `Resolver`, `Fetcher`, `Linker`, and `SandboxRunner` are instantiated per CLI
+invocation — there's no shared singleton or DI container to reason about.
+
+## What happens on `sandboxpm install`
+
+### 1. Resolve
+
+A breadth-first search over the dependency graph applies pnpm-style dedup — the first version
+that satisfies a range wins for a given package name. Peer dependency failures warn and skip
+rather than throwing. The result is written to `sandboxpm.lock` as sorted-key JSON, via an atomic
+write.
+
+### 2. Fetch & verify
+
+Each tarball streams in while being hashed, and the hash is checked against the registry's
+`dist.integrity` **before** extraction — never extract-then-verify. Already-cached tarballs whose
+files are all present in the store are skipped entirely. Downloads are concurrency-limited.
+
+### 3. Store
+
+`put()` copies a file into the CAS via a temp-file-and-atomic-rename. `link()` hard-links it into
+place, falling back to a plain copy on `EXDEV`/`EPERM` — cross-volume stores, OneDrive-synced
+folders, or Windows without Developer Mode enabled.
+
+### 4. Link
+
+The linker builds `node_modules/.sandboxpm/{name}@{version}/node_modules/{name}` from store hard
+links, then symlinks (junctions on Windows) direct dependencies into the root `node_modules` and
+transitive dependencies into each package's own scope — this is what keeps phantom dependency
+access impossible. On Windows, if symlink creation hits `EPERM`, sandboxpm falls back to `.cmd`
+shims.
+
+### 5. Prompt & sandbox
+
+Install scripts are partitioned by `.sandboxpmrc` policy into whitelist / blacklist / prompt /
+abort. Approved scripts run through `dockerode` in a read-only, `CapDrop: ALL`,
+seccomp-restricted container on an isolated bridge network. See [Security model](/docs/security)
+for the full sandbox story.
+
+## Docker sandbox images
+
+Two images are maintained, selected by the OS the connected Docker daemon runs:
+
+- **Linux (Alpine Node 20)** — non-root uid 1001, only `python3`/`make`/`g++` available for native
+  builds (no curl/wget/ssh). The entrypoint copies `node-addon-api`/`nan` headers into a writable
+  tmpfs so `node-gyp` can write build artifacts back under a read-only rootfs. The seccomp profile
+  is an explicit syscall allowlist, inlined directly into `SecurityOpt` (Docker requires the
+  seccomp JSON inline, not a host file path).
+- **Windows (`node:20-windowsservercore-ltsc2022` + VS Build Tools)** — used so native addons
+  compile as real Windows binaries instead of Linux ELFs. There's no non-root user here — Hyper-V
+  isolation is the security boundary instead — and no entrypoint, since the CLI supplies the full
+  command directly. Requires Docker Desktop switched to Windows-containers mode.
+
+Dependency bind-mounts mirror the on-disk `.sandboxpm` tree (nested, non-flat) rather than a flat
+`NODE_PATH`, specifically so two scripts needing different versions of the same dependency name
+never collide.

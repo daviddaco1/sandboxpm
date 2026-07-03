@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Non-flat `node_modules`** — pnpm-style structure (`node_modules/.sandboxpm/{name}@{version}/...`) to prevent phantom dependency access
 - **Docker isolation** — approved scripts run in ephemeral, capability-dropped containers with a seccomp syscall allowlist and no host credential/network access by default
 
-This is a pnpm workspace, not yarn — `packageManager` is pinned to `pnpm@11.2.2` in the root `package.json`.
+This is a pnpm workspace, not yarn — `packageManager` is pinned in the root `package.json`. Note: `.github/workflows/ci.yml` pins its own `pnpm/action-setup` version independently, which can drift from the `package.json` value — check both if you hit install/lockfile mismatches in CI.
 
 ## Commands
 
@@ -28,6 +28,9 @@ pnpm test:docker                 # docker.integration.test.ts, gated by DOCKER_I
 
 pnpm lint                        # eslint on packages/*/src/**/*.ts (no-explicit-any and no-non-null-assertion are errors; relaxed for *.test.ts)
 pnpm clean                       # remove dist/ and *.tsbuildinfo across packages
+
+pnpm sync-assets                 # regenerate docker/sandbox/ mirror from packages/scripts/assets/ (the canonical source)
+pnpm sync-assets:check           # verify the mirror is in sync instead of writing it (what CI runs)
 ```
 
 Run a single test file:
@@ -40,7 +43,7 @@ Build/test a single package (pnpm workspace filter):
 pnpm --filter @sandboxpm/<package> build
 ```
 
-CI (`.github/workflows/ci.yml`) runs build → lint → test → coverage on every push/PR, and e2e only on pushes to `main`.
+CI (`.github/workflows/ci.yml`) runs `pnpm audit` → build → lint → `sync-assets:check` → test → coverage on every push/PR, and e2e only on pushes to `main`.
 
 ## Monorepo Architecture
 
@@ -58,9 +61,9 @@ config → store → fetcher → resolver → linker → scripts → cli
 | `packages/resolver` | Semver resolution, dependency tree, `sandboxpm.lock` | `Resolver` (`resolve`, `resolveFromLock`) |
 | `packages/linker` | Non-flat `node_modules` from store hard links + symlinks | `Linker` (`link`, `unlink`) |
 | `packages/scripts` | Interactive script approval + Docker/Hyper-V sandbox runner | `ScriptPrompt`, `SandboxRunner` |
-| `packages/cli` | `bin.ts`: commander.js entry point, orchestrates the above | `install`, `add`, `remove`, `audit`, `whitelist`, `cache`, `config`, `init` |
+| `packages/cli` | `bin.ts`: commander.js entry point, orchestrates the above | `install`, `add`, `remove`, `init`, `audit`, `whitelist`, `cache`, `config`, `ls`, `why`, `outdated`, `info`, `search`, `run`/`exec`, `update`, `version`, `link`/`unlink`, `pack`/`publish`, `login`/`logout` |
 
-None of these are TODO scaffolds anymore — every `src/index.ts` has a real implementation and a colocated `*.test.ts`. Cross-package wiring lives entirely in `packages/cli/src/bin.ts`'s `install()` (one `CASStore`/`Resolver`/`Fetcher`/`Linker`/`SandboxRunner` instantiated per CLI invocation — no shared singleton/DI container).
+None of these are TODO scaffolds anymore — every `src/index.ts` has a real implementation and a colocated `*.test.ts`. `bin.ts` (~1,600 lines) is a full npm-compatible CLI surface, not just an installer — it also covers publishing (`pack`/`publish`/`login`/`logout`), local dev linking (`link`/`unlink`), and script running (`run`/`exec`, plus `test`/`start`/`stop` aliases; `exec` always sandboxes, `run` only with `--sandbox`). Cross-package wiring lives entirely in `packages/cli/src/bin.ts`'s `install()` (one `CASStore`/`Resolver`/`Fetcher`/`Linker`/`SandboxRunner` instantiated per CLI invocation — no shared singleton/DI container).
 
 ### Install flow (what actually happens on `sandboxpm install`)
 
@@ -85,7 +88,9 @@ None of these are TODO scaffolds anymore — every `src/index.ts` has a real imp
 ## Docker Sandbox
 
 Two sandbox images, selected by which OS the connected Docker daemon runs:
-- `docker/sandbox/` (also mirrored at `packages/scripts/assets/`): Alpine Node 20, non-root uid 1001, only `python3`/`make`/`g++` for native builds (no curl/wget/ssh). `sandbox-entrypoint.sh` copies `node-addon-api`/`nan` headers into the writable tmpfs so `node-gyp` can write build files back under a read-only rootfs. `seccomp.json` is an explicit syscall allowlist, inlined into `SecurityOpt` (Docker requires the seccomp JSON inline, not a host file path).
+- `packages/scripts/assets/` (the canonical source — it's what `SandboxRunner` actually builds images from and what ships in the published npm package; `docker/sandbox/` is a generated mirror for people browsing/building the image standalone, kept in sync via `pnpm sync-assets`): Alpine Node 20, non-root uid 1001, only `python3`/`make`/`g++` for native builds (no curl/wget/ssh). `sandbox-entrypoint.sh` copies `node-addon-api`/`nan` headers into the writable tmpfs so `node-gyp` can write build files back under a read-only rootfs. `seccomp.json` is an explicit syscall allowlist, inlined into `SecurityOpt` (Docker requires the seccomp JSON inline, not a host file path).
 - `packages/scripts/assets/windows/Dockerfile`: `node:20-windowsservercore-ltsc2022` + VS Build Tools C++ workload (~8GB image), used so native addons compile as real Windows binaries instead of Linux ELFs. No non-root user (Hyper-V isolation is the security boundary instead); no entrypoint (the CLI supplies the full `Cmd`). Requires Docker Desktop switched to Windows-containers mode.
 
 `SandboxRunner` builds nested (non-flat) dependency bind-mounts mirroring the on-disk `.sandboxpm` tree rather than a flat `NODE_PATH`, specifically to avoid version collisions when two scripts need different versions of the same dependency name.
+
+When `.sandboxpmrc`'s `sandbox.auditSyscalls` is on (Linux only), the runner swaps in `seccomp-audit.json` (a permissive allowlist) plus `CapAdd: SYS_PTRACE` and traces the script with `strace` to produce a real syscall report; otherwise the audit report is a cosmetic stub.

@@ -1,0 +1,105 @@
+export const metadata = {
+  title: 'Configuration — sandboxpm docs',
+}
+
+# Configuration
+
+Project configuration lives in a `.sandboxpmrc` YAML file. `sandboxpm init` scaffolds one for you;
+all fields are optional, and safe defaults are used for anything you omit. Copy
+`.sandboxpmrc.example` from the repo root to get started.
+
+## Sandbox settings
+
+```yaml
+sandbox:
+  # Maximum memory the Docker sandbox may use.
+  memory: 1g
+
+  # CPU quota (fractional cores).
+  cpus: 1.0
+
+  # Maximum wall-clock seconds a single script may run before being killed.
+  timeout: 120
+
+  # Egress policy for the sandboxed Docker network:
+  #   isolated   — all external traffic blocked (Docker Internal: true). Default.
+  #   restricted — external traffic allowed, but host iptables rules should
+  #                restrict access to the npm registry only.
+  #   none       — no network interface created inside the container.
+  networkMode: isolated
+```
+
+## Policy settings
+
+```yaml
+policies:
+  # What to do when a sandbox warning is detected:
+  #   continue — keep going silently
+  #   prompt   — ask the developer interactively (default)
+  #   abort    — treat the warning as a fatal error
+  onWarn: prompt
+
+  # What to do when a sandbox block is detected:
+  #   abort  — fail the install (default)
+  #   prompt — ask the developer interactively
+  onBlock: abort
+
+  # Extra directories containing OPA policy files (.rego) to evaluate.
+  extraPolicyDirs: []
+```
+
+## Registries
+
+```yaml
+registries:
+  - url: https://registry.npmjs.org
+  # For private registries add additional entries, e.g.:
+  # - url: https://npm.pkg.github.com
+  #   token: ${NPM_TOKEN}
+```
+
+## Script allowlists
+
+```yaml
+# Packages whose install scripts are always allowed without prompting.
+whitelist:
+  # - esbuild
+  # - canvas
+
+# Packages whose install scripts are always blocked without prompting.
+blacklist:
+  # - some-suspicious-package
+```
+
+Interactive decisions made during `sandboxpm install` can persist back into these lists — you're
+never asked about the same package twice unless you want to be.
+
+## Environment passthrough
+
+```yaml
+# Names of environment variables (NOT values) to pass into the sandbox.
+# Use with care — keep this list minimal and never pass secrets.
+envPassthrough:
+  # - CI
+  # - NODE_ENV
+```
+
+## Cache settings
+
+```yaml
+cache:
+  # Whether the content-addressable store is enabled.
+  enabled: true
+
+  # Maximum size of the CAS store in gigabytes before gc is triggered.
+  maxSizeGb: 10
+
+  # How many days a store entry may sit unreferenced before gc removes it.
+  ttlDays: 30
+```
+
+## Global configuration
+
+Separate from `.sandboxpmrc`, `~/.sandboxpm/config.json` holds machine-wide settings —
+`storeDir`, `cacheDir`, and `reportsDir` — written via a temp-file-and-rename so it's always
+consistent even if a write is interrupted. Manage it with `sandboxpm config get` / `config set`.

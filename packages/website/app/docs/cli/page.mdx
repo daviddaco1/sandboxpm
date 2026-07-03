@@ -1,0 +1,66 @@
+export const metadata = {
+  title: 'CLI reference — sandboxpm docs',
+}
+
+# CLI reference
+
+sandboxpm ships a full, npm-compatible CLI surface — not just an installer. This page lists every
+command exposed by the `sandboxpm` binary.
+
+## Install & dependencies
+
+| Command | Description |
+|---|---|
+| `sandboxpm install` | Install all dependencies from `package.json` |
+| `sandboxpm add <packages...>` | Add and install one or more packages |
+| `sandboxpm remove <packages...>` | Remove packages |
+| `sandboxpm update [packages...]` (alias `up`) | Update packages to latest compatible versions (`--latest` for absolute latest) |
+| `sandboxpm init` | Initialize a new project (`package.json` + `.sandboxpmrc`) |
+| `sandboxpm outdated` | Check for outdated packages |
+
+## Inspecting packages
+
+| Command | Description |
+|---|---|
+| `sandboxpm ls` | List installed packages |
+| `sandboxpm why <package>` | Explain why a package is installed |
+| `sandboxpm info <package>` | Show package metadata from the registry |
+| `sandboxpm search <query>` | Search packages in the registry (`--json` for machine-readable output) |
+| `sandboxpm audit` | Show a report of all sandboxed script runs |
+
+## Script execution
+
+| Command | Description |
+|---|---|
+| `sandboxpm run <script> [args...]` | Run a `package.json` script — native by default, add `--sandbox` to isolate |
+| `sandboxpm test` / `start` / `stop` | Aliases for `sandboxpm run test`/`start`/`stop` |
+| `sandboxpm exec <package> [args...]` | Download and execute a package binary in a Docker sandbox — **always** sandboxed |
+
+## Script trust
+
+| Command | Description |
+|---|---|
+| `sandboxpm whitelist add <package>` | Trust a package's scripts permanently |
+| `sandboxpm whitelist remove <package>` | Remove a package from the whitelist |
+
+## Store & config
+
+| Command | Description |
+|---|---|
+| `sandboxpm cache clean` | Remove all unreferenced store entries |
+| `sandboxpm cache stats` | Show store size and file count |
+| `sandboxpm cache warm` | Pre-download all packages into the store without linking |
+| `sandboxpm config get [key]` | Show global config, or a specific key |
+| `sandboxpm config set <key> <value>` | Set a global config value (`storeDir`, `cacheDir`, `reportsDir`) |
+
+## Publishing & local development
+
+| Command | Description |
+|---|---|
+| `sandboxpm pack` | Create a tarball of the current package |
+| `sandboxpm publish` | Publish the current package to the registry |
+| `sandboxpm login` | Save a registry access token to `~/.sandboxpm/auth.json` |
+| `sandboxpm logout` | Remove a saved registry token |
+| `sandboxpm link [path]` | Link a local package into `node_modules` (or register the current package globally) |
+| `sandboxpm unlink [name]` | Remove a linked package (or unregister the current package globally) |
+| `sandboxpm version <bump>` | Bump package version (`major`\|`minor`\|`patch`\|`prerelease`, or an exact version) |

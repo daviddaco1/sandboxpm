@@ -1,0 +1,73 @@
+export const metadata = {
+  title: 'Security model — sandboxpm docs',
+}
+
+# Security model
+
+npm, pnpm, and yarn all execute `preinstall`, `install`, and `postinstall` scripts **silently**
+during installation. A malicious package can read your SSH keys, exfiltrate `.env` files, or
+install a backdoor — all during a simple `npm install`. sandboxpm operates on a **zero-trust**
+principle instead:
+
+- No package has filesystem or network access during installation unless explicitly granted.
+- Scripts are never executed silently — every script requires developer consent.
+- Approved scripts run in ephemeral Docker containers with no access to host credentials, SSH
+  keys, or environment variables (beyond an explicit, minimal `envPassthrough` allowlist).
+- All tarballs are verified against the SHA-512 published by the registry before extraction —
+  never after.
+
+## The install-script prompt
+
+When sandboxpm finds a package with a lifecycle script, you see exactly what it is before
+anything runs:
+
+```
+──────────────────────────────────────────────────────
+⚠  3 packages have install scripts
+──────────────────────────────────────────────────────
+
+  1. esbuild@0.19.4
+     Type:    postinstall
+     Script:  node install.js
+     Inspect: https://unpkg.com/esbuild@0.19.4/install.js
+
+     Run this script? [y/N/inspect/always/never]
+```
+
+`.sandboxpmrc`'s `policies.onWarn` / `policies.onBlock` settings let a team pre-decide how sandbox
+warnings and blocks are handled in CI (`abort`, `prompt`, or `continue`), and `whitelist`/
+`blacklist` entries let you pre-approve or permanently ban specific packages — see
+[Configuration](/docs/configuration).
+
+## Content-addressable store
+
+Every file from every package is stored once in `~/.sandboxpm/store/`, keyed by its SHA-512 hash.
+When a package is installed into a project, its files are **hard-linked** from the store — never
+duplicated across projects:
+
+```
+~/.sandboxpm/store/
+└── sha512-{hash}    ← one file, shared across all projects via hard links
+
+project-a/node_modules/express  →  hard link to store
+project-b/node_modules/express  →  same hard link, zero extra disk space
+```
+
+## Non-flat node_modules
+
+Only direct dependencies appear in the root `node_modules/`. Transitive dependencies live nested
+under `node_modules/.sandboxpm/`. This prevents phantom dependency access: your code can only
+`import` what you explicitly declared in `package.json`.
+
+## Docker sandbox
+
+Approved scripts run through `dockerode` in a container that is:
+
+- read-only, with `CapDrop: ALL`
+- restricted by an explicit seccomp syscall allowlist (Linux) or Hyper-V isolation (Windows)
+- attached to an isolated bridge network with no host credential or network access by default
+
+A native (unsandboxed) fallback exists for sandbox-start failures or Linux-ELF/Windows-host
+native-addon mismatches, but it requires an explicit double-confirmation — sandboxpm never falls
+back to running a script unsandboxed silently. Full detail on the sandbox images and syscall
+policy lives in [Architecture](/docs/architecture).

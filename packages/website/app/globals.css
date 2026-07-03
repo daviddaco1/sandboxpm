@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+  sandboxpm is a dark-only (OLED) surface by design: it reads as a security /
+  terminal tool, not a marketing site with a light-mode toggle.
+*/
+:root {
+  --background: 222 47% 11%;
+  --foreground: 210 40% 98%;
+
+  --card: 217 33% 17%;
+  --card-foreground: 210 40% 98%;
+
+  --primary: 217 33% 17%;
+  --primary-foreground: 210 40% 98%;
+
+  --secondary: 215 25% 27%;
+  --secondary-foreground: 210 40% 98%;
+
+  --accent: 142 71% 45%;
+  --accent-foreground: 222 47% 11%;
+
+  --muted: 222 26% 20%;
+  --muted-foreground: 215 20% 65%;
+
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 210 40% 98%;
+
+  --border: 215 19% 35%;
+  --ring: 217 33% 40%;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+body {
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+}

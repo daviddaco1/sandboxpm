@@ -1,0 +1,55 @@
+export const metadata = {
+  title: 'Installation — sandboxpm docs',
+}
+
+# Installation
+
+## Requirements
+
+- Node.js 18+
+- Docker Engine 24+ (Linux / macOS / Windows with WSL2)
+- 2GB free disk space for the base sandbox image and initial cache
+
+## Install the CLI
+
+```bash
+npm install -g sandboxpm
+```
+
+## Common commands
+
+| Command | Description |
+|---|---|
+| `sandboxpm init` | Initialize `.sandboxpmrc` in a project |
+| `sandboxpm install` | Install all dependencies from `package.json` |
+| `sandboxpm add <pkg>` | Add and install a new package |
+| `sandboxpm remove <pkg>` | Remove a package |
+| `sandboxpm audit` | Show a report of all sandboxed script runs |
+| `sandboxpm cache clean` | Clear the CAS store |
+| `sandboxpm whitelist add <pkg>` | Trust a package's scripts permanently |
+
+See the full [CLI reference](/docs/cli) for every command sandboxpm ships.
+
+## First install
+
+```bash
+sandboxpm install
+
+✓ Resolving dependencies... (47 packages)
+✓ Downloading tarballs... (12 new, 35 from store)
+✓ Verifying SHA-512... OK
+✓ Linking node_modules...
+
+──────────────────────────────────────────────────────
+⚠  3 packages have install scripts
+──────────────────────────────────────────────────────
+
+  1. esbuild@0.19.4
+     Type:    postinstall
+     Script:  node install.js
+     Inspect: https://unpkg.com/esbuild@0.19.4/install.js
+
+     Run this script? [y/N/inspect/always/never]
+```
+
+Every script gets this treatment — nothing runs until you say so.
