@@ -118,6 +118,76 @@ describe('Resolver.selectVersion', () => {
   })
 })
 
+describe('Resolver.registryUrl (internal getter)', () => {
+  it('strips a trailing slash from the configured registry url', () => {
+    const resolver = new Resolver([{ url: 'https://custom.registry.io/' }])
+    expect((resolver as unknown as { registryUrl: string }).registryUrl).toBe('https://custom.registry.io')
+  })
+})
+
+describe('Resolver.fetchPackument — network-level failure', () => {
+  it('warns but does not throw when an optional dependency fetch throws before responding', async () => {
+    const PLATFORM_REGISTRY = { ...REGISTRY }
+    vi.spyOn(global, 'fetch' as keyof typeof global).mockImplementation(async (url) => {
+      const name = String(url).replace('https://registry.npmjs.org/', '')
+      if (name === 'unreachable-pkg') throw new Error('network down')
+      const packument = PLATFORM_REGISTRY[name as keyof typeof PLATFORM_REGISTRY]
+      if (!packument) return { ok: false, status: 404, statusText: 'Not Found', json: async () => ({}) } as Response
+      return { ok: true, status: 200, json: async () => packument } as Response
+    })
+
+    await writePackageJson(tmpDir, {
+      dependencies: { express: '^4.0.0' },
+      optionalDependencies: { 'unreachable-pkg': '^1.0.0' },
+    })
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const resolver = new Resolver()
+    const tree = await resolver.resolve(tmpDir) // must NOT throw
+
+    expect(tree.packages.has('express@4.18.2')).toBe(true)
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('optional dep warning: failed to fetch "unreachable-pkg"'))
+  })
+
+  it('throws when a required (non-optional, non-peer) dependency cannot be fetched at all', async () => {
+    mockRegistry() // 'totally-unknown-pkg' is not in REGISTRY -> 404 for every registry attempt
+    await writePackageJson(tmpDir, {
+      dependencies: { 'totally-unknown-pkg': '^1.0.0' },
+    })
+
+    const resolver = new Resolver()
+    await expect(resolver.resolve(tmpDir)).rejects.toThrow(/Registry.*404/)
+  })
+})
+
+describe('Resolver.resolve — unsatisfiable version for an optional dependency that exists', () => {
+  it('warns but does not throw when the optional dependency package exists but no version satisfies the range', async () => {
+    const PLATFORM_REGISTRY = {
+      ...REGISTRY,
+      'native-pkg': makePackument('native-pkg', {
+        '1.0.0': { optionalDeps: { lodash: '^99.0.0' } }, // lodash exists, but no v99
+      }),
+    }
+    vi.spyOn(global, 'fetch' as keyof typeof global).mockImplementation(async (url) => {
+      const name = String(url).replace('https://registry.npmjs.org/', '')
+      const packument = PLATFORM_REGISTRY[name as keyof typeof PLATFORM_REGISTRY]
+      if (!packument) return { ok: false, status: 404, statusText: 'Not Found', json: async () => ({}) } as Response
+      return { ok: true, status: 200, json: async () => packument } as Response
+    })
+
+    await writePackageJson(tmpDir, { dependencies: { 'native-pkg': '^1.0.0' } })
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    const resolver = new Resolver()
+    const tree = await resolver.resolve(tmpDir) // must NOT throw
+
+    expect(tree.packages.has('native-pkg@1.0.0')).toBe(true)
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('no version of "lodash" satisfies'))
+  })
+})
+
 describe('Resolver.resolve', () => {
   it('resolves direct + transitive dependencies', async () => {
     mockRegistry()
@@ -485,6 +555,36 @@ describe('Resolver.resolve — version conflicts (pnpm-style nested)', () => {
 
     expect(tree.packages.get('pkg-a@1.0.0')?.dependencies['lodash']).toBe('4.17.21')
     expect(tree.packages.get('pkg-b@1.0.0')?.dependencies['lodash']).toBe('3.10.1')
+  })
+})
+
+describe('Resolver.resolveFromLock — reads package.json alongside the lockfile', () => {
+  it('populates directDeps from dependencies, devDependencies, and optionalDependencies', async () => {
+    const lockfile = {
+      lockfileVersion: 1,
+      sandboxpmVersion: '0.1.0',
+      packages: {
+        'express@4.18.2': {
+          resolved: 'https://registry.npmjs.org/express/-/express-4.18.2.tgz',
+          integrity: 'sha512-abc==',
+          dependencies: {},
+        },
+      },
+    }
+    const lockPath = path.join(tmpDir, 'sandboxpm.lock')
+    await fs.writeFile(lockPath, JSON.stringify(lockfile))
+    await writePackageJson(tmpDir, {
+      dependencies: { express: '^4.0.0' },
+      devDependencies: { jest: '29.0.0' },
+      optionalDependencies: { 'some-optional': '^1.0.0' },
+    })
+
+    const resolver = new Resolver()
+    const tree = await resolver.resolveFromLock(lockPath)
+
+    expect(tree.directDeps).toContainEqual({ name: 'express', range: '^4.0.0', type: 'prod' })
+    expect(tree.directDeps).toContainEqual({ name: 'jest', range: '29.0.0', type: 'dev' })
+    expect(tree.directDeps).toContainEqual({ name: 'some-optional', range: '^1.0.0', type: 'optional' })
   })
 })
 

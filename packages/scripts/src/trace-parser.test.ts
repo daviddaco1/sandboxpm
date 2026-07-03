@@ -71,6 +71,14 @@ describe('parseStraceLog', () => {
     expect(report.status).toBe('clean')
   })
 
+  it('falls back to "?" for the port when the connect line has no sin_port field', () => {
+    const log = '12:00:00.000000 connect(3, {sa_family=AF_INET, sin_addr=inet_addr("1.2.3.4")}, 16) = 0\n'
+
+    const report = parseStraceLog(log, { packageDir: PACKAGE_DIR })
+
+    expect(report.networkConnections).toEqual(['1.2.3.4:?'])
+  })
+
   it('returns an empty clean report for an empty trace', () => {
     const report = parseStraceLog('', { packageDir: PACKAGE_DIR })
 

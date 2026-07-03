@@ -216,6 +216,77 @@ describe('Fetcher.fetch (async iterable)', () => {
   })
 })
 
+describe('Fetcher.fetchOne — registry/network error branches', () => {
+  it('throws when the registry responds not-ok for the packument request', async () => {
+    vi.spyOn(global, 'fetch' as any).mockImplementation(async () => {
+      return { ok: false, status: 404, statusText: 'Not Found', json: async () => ({}) }
+    })
+
+    const fetcher = new Fetcher(store, [], { tmpDir })
+    await expect(
+      fetcher.fetchOne({ name: 'missing-pkg', version: '1.0.0' })
+    ).rejects.toThrow(/Registry fetch failed/)
+  })
+
+  it('throws when the tarball download responds not-ok', async () => {
+    vi.spyOn(global, 'fetch' as any).mockImplementation(async (url: string) => {
+      if (url.endsWith('.tgz')) {
+        return { ok: false, status: 500, statusText: 'Server Error' }
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          name: 'fake-pkg', version: '1.0.0',
+          dist: { tarball: 'http://localhost/fake-pkg-1.0.0.tgz' },
+          scripts: {}, dependencies: {},
+        }),
+      }
+    })
+
+    const fetcher = new Fetcher(store, [], { tmpDir })
+    await expect(
+      fetcher.fetchOne({ name: 'fake-pkg', version: '1.0.0' })
+    ).rejects.toThrow(/Failed to download tarball/)
+  })
+
+  it('throws when the tarball response has no body', async () => {
+    vi.spyOn(global, 'fetch' as any).mockImplementation(async (url: string) => {
+      if (url.endsWith('.tgz')) {
+        return { ok: true, status: 200, body: undefined }
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          name: 'fake-pkg', version: '1.0.0',
+          dist: { tarball: 'http://localhost/fake-pkg-1.0.0.tgz' },
+          scripts: {}, dependencies: {},
+        }),
+      }
+    })
+
+    const fetcher = new Fetcher(store, [], { tmpDir })
+    await expect(
+      fetcher.fetchOne({ name: 'fake-pkg', version: '1.0.0' })
+    ).rejects.toThrow(/Empty response body/)
+  })
+})
+
+describe('Fetcher.fetchOne — download backpressure', () => {
+  it('handles a large tarball response that exceeds the write stream buffer (drain path)', async () => {
+    // A single-chunk response body larger than the fs write-stream's highWaterMark
+    // forces writer.write() to return false, exercising the once('drain', pump) branch.
+    const bigContent = crypto.randomBytes(500_000).toString('hex')
+    const { tgzPath, integrity } = await makeTarball({ 'package/data.txt': bigContent })
+    mockFetch(tgzPath, integrity)
+
+    const fetcher = new Fetcher(store, [], { tmpDir })
+    const result = await fetcher.fetchOne({ name: 'fake-pkg', version: '1.0.0' })
+    expect(result.files.length).toBeGreaterThan(0)
+  })
+})
+
 describe('Fetcher.fetch — platform filtering', () => {
   it('skips a package whose os constraint never matches the real test host, silently', async () => {
     const { tgzPath, integrity } = await makeTarball({

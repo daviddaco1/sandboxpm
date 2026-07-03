@@ -1,4 +1,12 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+
+// Node 24 ESM namespace properties are non-configurable; spread into a plain
+// object so vi.spyOn can replace individual methods.
+vi.mock('fs/promises', async () => {
+  const actual = await vi.importActual<typeof import('fs/promises')>('fs/promises')
+  return { ...actual }
+})
+
 import * as fs from 'fs/promises'
 import * as path from 'path'
 import * as os from 'os'
@@ -20,6 +28,7 @@ beforeEach(async () => {
 })
 
 afterEach(async () => {
+  vi.restoreAllMocks()
   await fs.rm(tmpDir, { recursive: true, force: true })
 })
 
@@ -326,6 +335,105 @@ describe('Linker._linkBins — chmod +x', () => {
     if (process.platform !== 'win32') {
       expect(stat.mode & 0o111).not.toBe(0)
     }
+  })
+})
+
+describe('Linker.link — unresolvable direct dep', () => {
+  it('skips a direct dependency whose resolved version cannot be found in the tree', async () => {
+    const { hash } = await storeFile('foo')
+    const projectDir = path.join(tmpDir, 'project')
+    await fs.mkdir(projectDir)
+
+    // "missing-dep" is declared as a direct dep but never made it into tree.packages
+    // (e.g. resolution dropped it) — _findVersion must return undefined for it.
+    const tree = makeTree({
+      packages: [{ name: 'foo', version: '1.0.0' }],
+      directDeps: [
+        { name: 'foo', range: '^1.0.0', type: 'prod' },
+        { name: 'missing-dep', range: '^1.0.0', type: 'prod' },
+      ],
+    })
+    const fetchResults = makeFetchResults([
+      { name: 'foo', version: '1.0.0', files: [{ relativePath: 'index.js', hash }] },
+    ])
+
+    const result = await linker.link(tree, fetchResults, { projectDir, includeDevDependencies: true })
+
+    const missingSymlink = path.join(projectDir, 'node_modules', 'missing-dep')
+    await expect(fs.lstat(missingSymlink)).rejects.toThrow(/ENOENT/)
+    expect(result.symlinksCreated).toBeGreaterThanOrEqual(1)
+  })
+})
+
+describe('Linker._ensureSymlink — non-Windows platform', () => {
+  it('calls fs.symlink without a junction/file type argument on non-win32 platforms', async () => {
+    const originalPlatform = process.platform
+    Object.defineProperty(process, 'platform', { value: 'linux' })
+    try {
+      const { hash } = await storeFile('posix content')
+      const projectDir = path.join(tmpDir, 'project')
+      await fs.mkdir(projectDir)
+
+      const tree = makeTree({ packages: [{ name: 'foo', version: '1.0.0' }] })
+      const fetchResults = makeFetchResults([{
+        name: 'foo', version: '1.0.0',
+        files: [{ relativePath: 'index.js', hash }],
+      }])
+
+      const symlinkSpy = vi.spyOn(fs, 'symlink').mockResolvedValue(undefined)
+
+      await linker.link(tree, fetchResults, { projectDir, includeDevDependencies: true })
+
+      expect(symlinkSpy).toHaveBeenCalled()
+      const call = symlinkSpy.mock.calls[0]
+      // non-win32 branch invokes fs.symlink(target, symlinkPath) — no third "type" arg
+      expect(call).toHaveLength(2)
+    } finally {
+      Object.defineProperty(process, 'platform', { value: originalPlatform })
+    }
+  })
+})
+
+describe('Linker._linkBins — non-EPERM error propagation', () => {
+  it('rethrows a bin symlink error that is not a Windows EPERM', async () => {
+    const pkgJsonContent = JSON.stringify({
+      name: 'mycli', version: '1.0.0', bin: { mycli: './bin/cli.js' },
+    })
+    const { hash: pkgJsonHash } = await storeFile(pkgJsonContent)
+    const { hash: binHash } = await storeFile('#!/usr/bin/env node\nconsole.log("hi")')
+
+    const projectDir = path.join(tmpDir, 'project')
+    await fs.mkdir(projectDir)
+
+    // Make mycli a "dev" direct dep so Step 2 (root symlink) skips it via
+    // includeDevDependencies:false, leaving _linkBins's symlink call (Step 4)
+    // as the only fs.symlink invocation in this run.
+    const tree = makeTree({
+      packages: [{ name: 'mycli', version: '1.0.0' }],
+      directDeps: [{ name: 'mycli', range: '^1.0.0', type: 'dev' }],
+    })
+    const fetchResults = makeFetchResults([{
+      name: 'mycli', version: '1.0.0',
+      files: [
+        { relativePath: 'package.json', hash: pkgJsonHash },
+        { relativePath: 'bin/cli.js', hash: binHash },
+      ],
+    }])
+
+    const boom = Object.assign(new Error('boom'), { code: 'EACCES' })
+    vi.spyOn(fs, 'symlink').mockRejectedValueOnce(boom)
+
+    await expect(
+      linker.link(tree, fetchResults, { projectDir, includeDevDependencies: false })
+    ).rejects.toThrow('boom')
+  })
+})
+
+describe('Linker.unlink — no node_modules', () => {
+  it('is a no-op when node_modules does not exist at all', async () => {
+    const projectDir = path.join(tmpDir, 'never-linked')
+    await fs.mkdir(projectDir, { recursive: true })
+    await expect(linker.unlink(projectDir)).resolves.toBeUndefined()
   })
 })
 
