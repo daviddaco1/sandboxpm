@@ -1,5 +1,7 @@
 packages:
   - 'packages/*'
+onlyBuiltDependencies:
+  - esbuild
 allowBuilds:
   cpu-features: false
   esbuild: true
