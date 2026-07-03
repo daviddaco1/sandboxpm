@@ -24,11 +24,12 @@ RUN apk add --no-cache \
     && rm -rf /var/cache/apk/*
 
 # Install common native-module build tools globally so install scripts can call
-# them directly (node-pre-gyp, prebuild-install, cross-env, node-gyp).
+# them directly (node-pre-gyp, prebuild-install, node-gyp-build, cross-env, node-gyp).
 # Pinned to avoid silent upgrades; update intentionally when needed.
 RUN npm install -g \
     @mapbox/node-pre-gyp@1 \
     prebuild-install@7 \
+    node-gyp-build@4 \
     cross-env@7 \
     node-gyp@10 \
     node-addon-api@8 \
@@ -43,6 +44,10 @@ RUN node-gyp install --ensure
 
 COPY sandbox-entrypoint.sh /usr/local/bin/sandbox-entrypoint.sh
 RUN chmod +x /usr/local/bin/sandbox-entrypoint.sh
+
+# Bumped whenever the image contents change — SandboxRunner checks this label
+# before using a cached image and rebuilds if it doesn't match.
+LABEL sandboxpm.image.version="1.1"
 
 WORKDIR /sandbox/package
 USER sandbox

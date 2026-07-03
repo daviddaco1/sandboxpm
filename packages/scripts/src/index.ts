@@ -54,6 +54,9 @@ const SEPARATOR = '─'.repeat(50)
 const SANDBOX_IMAGE = 'sandboxpm-sandbox:latest'
 const SANDBOX_IMAGE_WIN = 'sandboxpm-sandbox-win:latest'
 const SANDBOX_NETWORK = 'sandboxpm-net'
+// Must match the LABEL sandboxpm.image.version in assets/Dockerfile.
+// Bump this string whenever the Dockerfile changes so stale cached images are rebuilt.
+const SANDBOX_IMAGE_VERSION = '1.1'
 
 // import.meta.url → dist/index.js; ../assets/ → assets/ (bundled with the package)
 const ASSETS_DIR = fileURLToPath(new URL('../assets', import.meta.url))
@@ -248,7 +251,7 @@ export class ScriptPrompt {
     const isSandboxError = result.sandboxReport?.status === 'blocked'
     const reason = isSandboxError
       ? 'blocked by sandbox (container setup error)'
-      : 'compiled a Linux binary incompatible with this Windows host'
+      : 'compiled a Linux binary incompatible with this host'
 
     console.log(chalk.gray(`\n${SEPARATOR}`))
     console.log(chalk.yellow(`  ⚠  ${pkgId} ${script.lifecycle}: ${reason}.`))
@@ -607,10 +610,19 @@ export class SandboxRunner {
     const image = isWin ? SANDBOX_IMAGE_WIN : SANDBOX_IMAGE
     const assetsDir = isWin ? ASSETS_DIR_WIN : ASSETS_DIR
 
-    try {
-      await this.docker.getImage(image).inspect()
-      return  // image already present locally
-    } catch { /* not found → build it */ }
+    if (!isWin) {
+      try {
+        const info = await this.docker.getImage(image).inspect()
+        const labels = (info.Config as Record<string, unknown> | undefined)?.['Labels'] as Record<string, string> | undefined
+        if (labels?.['sandboxpm.image.version'] === SANDBOX_IMAGE_VERSION) return
+        // Label mismatch — Dockerfile was updated; fall through to rebuild
+      } catch { /* not found → build it */ }
+    } else {
+      try {
+        await this.docker.getImage(image).inspect()
+        return  // Windows image has no version label; presence check is sufficient
+      } catch { /* not found → build it */ }
+    }
 
     // Build from bundled Dockerfile — must succeed; a failed build means scripts
     // would run without the hardened sandbox image, which is unacceptable.
@@ -841,11 +853,22 @@ export class SandboxRunner {
       ? ['/S', '/C', script.command]
       : ['-c', script.command]
 
-    // Prepend the package's sibling .bin so tools like node-pre-gyp,
-    // prebuild-install, and node-gyp are found without being globally installed.
+    // Prepend multiple .bin directories to cover the common cases for native scripts:
+    //   1. The package's own sibling .bin (node-pre-gyp, prebuild-install, etc.)
+    //   2. The project root's node_modules/.bin (node-gyp if it's a devDep)
+    //   3. The directory of the current node executable (globally installed tools like
+    //      node-gyp when installed via npm -g or nvm)
     const siblingBin = path.join(path.dirname(packageDir), '.bin')
+    const nodeModulesMarker = `${path.sep}node_modules${path.sep}.sandboxpm${path.sep}`
+    const markerIdx = packageDir.indexOf(nodeModulesMarker)
+    const projectBin = markerIdx !== -1
+      ? path.join(packageDir.slice(0, markerIdx), 'node_modules', '.bin')
+      : ''
+    const nodeBin = path.dirname(process.execPath)
     const pathSep = process.platform === 'win32' ? ';' : ':'
-    const augmentedPath = `${siblingBin}${pathSep}${process.env['PATH'] ?? ''}`
+    const augmentedPath = [siblingBin, projectBin, nodeBin, process.env['PATH'] ?? '']
+      .filter(Boolean)
+      .join(pathSep)
 
     return new Promise<ScriptRunResult>((resolve) => {
       const child = spawn(cmd, cmdArgs, {
@@ -880,10 +903,10 @@ export class SandboxRunner {
   }
 
   // Scans packageDir for .node files with an ELF magic header, which indicates
-  // a Linux binary that cannot be loaded on a Windows host.
+  // a Linux binary that cannot be loaded on this host.
   private async _hasIncompatibleNatives(packageDir: string): Promise<boolean> {
-    if (process.platform !== 'win32') return false
-    if (await this._isWindowsDaemon()) return false
+    if (process.platform === 'linux') return false
+    if (process.platform === 'win32' && await this._isWindowsDaemon()) return false
 
     const ELF_MAGIC = Buffer.from([0x7f, 0x45, 0x4c, 0x46])
 

@@ -48,7 +48,6 @@ async function makeTarball(files: Record<string, string>): Promise<{ tgzPath: st
 }
 
 function mockFetch(tgzPath: string, integrity: string) {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return vi.spyOn(global, 'fetch' as any).mockImplementation(async (url: string) => {
     if (url.includes('registry.npmjs.org') && !url.endsWith('.tgz')) {
       // packument version endpoint

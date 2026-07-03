@@ -30,7 +30,7 @@ export interface PackageId {
 }
 
 export interface PackageScript {
-  lifecycle: 'preinstall' | 'install' | 'postinstall'
+  lifecycle: 'preinstall' | 'install' | 'postinstall' | 'run'
   command: string
   inspectUrl: string
 }

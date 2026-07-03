@@ -24,22 +24,47 @@ async function writePackageJson(dir: string, content: object) {
 // ─── init ─────────────────────────────────────────────────────────────────────
 
 describe('init', () => {
-  it('creates .sandboxpmrc with safe defaults', async () => {
+  it('creates package.json and .sandboxpmrc with yes:true', async () => {
     const { init } = await import('./bin.js')
-    await init({ cwd: tmpDir })
+    await init({ cwd: tmpDir, yes: true })
 
-    const content = await fs.readFile(path.join(tmpDir, '.sandboxpmrc'), 'utf8')
-    expect(content).toContain('memory')
-    expect(content).toContain('networkMode')
+    const pkg = JSON.parse(await fs.readFile(path.join(tmpDir, 'package.json'), 'utf8'))
+    expect(pkg.name).toBe(path.basename(tmpDir).toLowerCase().replace(/[^a-z0-9]+/g, '-'))
+    expect(pkg.version).toBe('1.0.0')
+    expect(pkg.license).toBe('MIT')
+
+    const rc = await fs.readFile(path.join(tmpDir, '.sandboxpmrc'), 'utf8')
+    expect(rc).toContain('memory')
+    expect(rc).toContain('networkMode')
   })
 
   it('does not overwrite existing .sandboxpmrc', async () => {
     const { init } = await import('./bin.js')
     await fs.writeFile(path.join(tmpDir, '.sandboxpmrc'), 'version: 1\n')
-    await init({ cwd: tmpDir }) // should be no-op
+    await init({ cwd: tmpDir, yes: true })
 
     const content = await fs.readFile(path.join(tmpDir, '.sandboxpmrc'), 'utf8')
     expect(content.trim()).toBe('version: 1')
+  })
+
+  it('does not overwrite existing package.json', async () => {
+    const { init } = await import('./bin.js')
+    await fs.writeFile(
+      path.join(tmpDir, 'package.json'),
+      JSON.stringify({ name: 'existing-project', version: '2.0.0' }, null, 2)
+    )
+    await init({ cwd: tmpDir, yes: true })
+
+    const pkg = JSON.parse(await fs.readFile(path.join(tmpDir, 'package.json'), 'utf8'))
+    expect(pkg.name).toBe('existing-project')
+    expect(pkg.version).toBe('2.0.0')
+  })
+
+  it('resolves without error when both files already exist', async () => {
+    const { init } = await import('./bin.js')
+    await fs.writeFile(path.join(tmpDir, 'package.json'), JSON.stringify({ name: 'x' }))
+    await fs.writeFile(path.join(tmpDir, '.sandboxpmrc'), 'version: 1\n')
+    await expect(init({ cwd: tmpDir, yes: true })).resolves.toBeUndefined()
   })
 })
 
@@ -70,6 +95,95 @@ describe('whitelistAdd / whitelistRemove', () => {
     const { loadRc } = await import('@sandboxpm/config')
     const rc = await loadRc(tmpDir)
     expect(rc.whitelist).not.toContain('remove-me')
+  })
+})
+
+// ─── listPackages ─────────────────────────────────────────────────────────────
+
+describe('listPackages', () => {
+  it('exits with error when sandboxpm.lock is missing', async () => {
+    const { listPackages } = await import('./bin.js')
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
+    await listPackages({ cwd: tmpDir }).catch(() => {})
+    expect(exitSpy).toHaveBeenCalledWith(1)
+  })
+})
+
+// ─── why ──────────────────────────────────────────────────────────────────────
+
+describe('why', () => {
+  it('exits with error when sandboxpm.lock is missing', async () => {
+    const { why } = await import('./bin.js')
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
+    await why('some-package', { cwd: tmpDir }).catch(() => {})
+    expect(exitSpy).toHaveBeenCalledWith(1)
+  })
+})
+
+// ─── outdated ─────────────────────────────────────────────────────────────────
+
+describe('outdated', () => {
+  it('exits with error when sandboxpm.lock is missing', async () => {
+    const { outdated } = await import('./bin.js')
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
+    await outdated({ cwd: tmpDir }).catch(() => {})
+    expect(exitSpy).toHaveBeenCalledWith(1)
+  })
+})
+
+// ─── runScript ────────────────────────────────────────────────────────────────
+
+describe('runScript', () => {
+  it('exits with error when package.json is missing', async () => {
+    const { runScript } = await import('./bin.js')
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
+    await runScript('build', [], { cwd: tmpDir }).catch(() => {})
+    expect(exitSpy).toHaveBeenCalledWith(1)
+  })
+
+  it('exits with error when script is not defined in package.json', async () => {
+    const { runScript } = await import('./bin.js')
+    await writePackageJson(tmpDir, { name: 'my-app', scripts: { build: 'tsc' } })
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
+    await runScript('nonexistent', [], { cwd: tmpDir }).catch(() => {})
+    expect(exitSpy).toHaveBeenCalledWith(1)
+  })
+})
+
+// ─── bumpVersion ──────────────────────────────────────────────────────────────
+
+describe('bumpVersion', () => {
+  it('exits with error for invalid bump type', async () => {
+    const { bumpVersion } = await import('./bin.js')
+    await writePackageJson(tmpDir, { name: 'my-app', version: '1.0.0' })
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
+    await bumpVersion('invalid-bump', { cwd: tmpDir, noGitTag: true }).catch(() => {})
+    expect(exitSpy).toHaveBeenCalledWith(1)
+  })
+
+  it('bumps patch version and writes package.json (no git tag)', async () => {
+    const { bumpVersion } = await import('./bin.js')
+    await writePackageJson(tmpDir, { name: 'my-app', version: '1.0.0' })
+    await bumpVersion('patch', { cwd: tmpDir, noGitTag: true })
+    const pkg = JSON.parse(await fs.readFile(path.join(tmpDir, 'package.json'), 'utf8'))
+    expect(pkg.version).toBe('1.0.1')
+  })
+
+  it('bumps to an exact version (no git tag)', async () => {
+    const { bumpVersion } = await import('./bin.js')
+    await writePackageJson(tmpDir, { name: 'my-app', version: '1.0.0' })
+    await bumpVersion('2.5.0', { cwd: tmpDir, noGitTag: true })
+    const pkg = JSON.parse(await fs.readFile(path.join(tmpDir, 'package.json'), 'utf8'))
+    expect(pkg.version).toBe('2.5.0')
+  })
+})
+
+// ─── login / logout ───────────────────────────────────────────────────────────
+
+describe('login / logout', () => {
+  it('logout does not error when not logged in', async () => {
+    const { logout } = await import('./bin.js')
+    await expect(logout({ registry: 'https://example.registry.test' })).resolves.toBeUndefined()
   })
 })
 
