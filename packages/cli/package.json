@@ -36,7 +36,7 @@
     "@sandboxpm/linker": "workspace:*",
     "@sandboxpm/scripts": "workspace:*",
     "chalk": "^5.3.0",
-    "commander": "^12.0.0",
+    "commander": "^15.0.0",
     "dockerode": "^4.0.0",
     "ora": "^8.0.0",
     "pino": "^9.0.0",
