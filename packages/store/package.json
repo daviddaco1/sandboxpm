@@ -1,6 +1,6 @@
 {
   "name": "@sandboxpm/store",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Content-addressable store (CAS) for sandboxpm — SHA-512 keyed hard links",
   "license": "MIT",
   "repository": {
@@ -8,6 +8,7 @@
     "url": "git+https://github.com/daviddaco1/sandboxpm.git",
     "directory": "packages/store"
   },
+  "homepage": "https://sandboxpm.andresodev.com",
   "publishConfig": {
     "access": "public"
   },

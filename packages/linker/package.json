@@ -1,6 +1,6 @@
 {
   "name": "@sandboxpm/linker",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Builds non-flat node_modules from the sandboxpm content-addressable store",
   "license": "MIT",
   "repository": {
@@ -8,6 +8,7 @@
     "url": "git+https://github.com/daviddaco1/sandboxpm.git",
     "directory": "packages/linker"
   },
+  "homepage": "https://sandboxpm.andresodev.com",
   "publishConfig": {
     "access": "public"
   },

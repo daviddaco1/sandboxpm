@@ -1,6 +1,6 @@
 {
   "name": "sandboxpm",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A security-first, zero-trust package manager for Node.js — never runs install scripts without consent.",
   "license": "MIT",
   "repository": {
@@ -8,7 +8,7 @@
     "url": "git+https://github.com/daviddaco1/sandboxpm.git",
     "directory": "packages/cli"
   },
-  "homepage": "https://github.com/daviddaco1/sandboxpm#readme",
+  "homepage": "https://sandboxpm.andresodev.com",
   "bugs": "https://github.com/daviddaco1/sandboxpm/issues",
   "type": "module",
   "bin": {

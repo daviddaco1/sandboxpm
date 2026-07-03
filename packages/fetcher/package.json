@@ -1,6 +1,6 @@
 {
   "name": "@sandboxpm/fetcher",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Tarball download, integrity verification, and extraction for sandboxpm",
   "license": "MIT",
   "repository": {
@@ -8,6 +8,7 @@
     "url": "git+https://github.com/daviddaco1/sandboxpm.git",
     "directory": "packages/fetcher"
   },
+  "homepage": "https://sandboxpm.andresodev.com",
   "publishConfig": {
     "access": "public"
   },

@@ -1,6 +1,6 @@
 {
   "name": "@sandboxpm/config",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Loads and merges .sandboxpmrc config files for sandboxpm",
   "license": "MIT",
   "repository": {
@@ -8,6 +8,7 @@
     "url": "git+https://github.com/daviddaco1/sandboxpm.git",
     "directory": "packages/config"
   },
+  "homepage": "https://sandboxpm.andresodev.com",
   "publishConfig": {
     "access": "public"
   },

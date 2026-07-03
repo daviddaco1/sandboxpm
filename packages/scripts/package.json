@@ -1,6 +1,6 @@
 {
   "name": "@sandboxpm/scripts",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Interactive install-script approval and Docker/Hyper-V sandbox runner for sandboxpm",
   "license": "MIT",
   "repository": {
@@ -8,6 +8,7 @@
     "url": "git+https://github.com/daviddaco1/sandboxpm.git",
     "directory": "packages/scripts"
   },
+  "homepage": "https://sandboxpm.andresodev.com",
   "publishConfig": {
     "access": "public"
   },

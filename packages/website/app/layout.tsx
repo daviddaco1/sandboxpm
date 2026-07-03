@@ -17,9 +17,18 @@ const fontBody = IBM_Plex_Sans({
 })
 
 export const metadata: Metadata = {
+  metadataBase: new URL('https://sandboxpm.andresodev.com'),
   title: 'sandboxpm — the zero-trust Node.js package manager',
   description:
     'sandboxpm never runs install scripts without your consent, verifies every download by SHA-512, and sandboxes approved scripts in disposable Docker containers.',
+  openGraph: {
+    title: 'sandboxpm — the zero-trust Node.js package manager',
+    description:
+      'sandboxpm never runs install scripts without your consent, verifies every download by SHA-512, and sandboxes approved scripts in disposable Docker containers.',
+    url: 'https://sandboxpm.andresodev.com',
+    siteName: 'sandboxpm',
+    type: 'website',
+  },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }): React.JSX.Element {
