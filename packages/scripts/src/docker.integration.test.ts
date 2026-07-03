@@ -115,4 +115,30 @@ describe.skipIf(!DOCKER_INTEGRATION)('SandboxRunner — Docker integration', () 
     // /etc/pwned must NOT exist on the host tmpDir
     await expect(fs.access(path.join(tmpDir, 'pwned'))).rejects.toThrow()
   }, 60_000)
+
+  it('auditSyscalls: real strace trace records a blocked connection under isolated networking', async () => {
+    const rc = { ...defaultRc(), sandbox: { ...defaultRc().sandbox, auditSyscalls: true } }
+    const runner = new SandboxRunner(docker, rc)
+
+    // networkMode is 'isolated' by default (Internal:true bridge) — this connect() must fail.
+    const result = await runner.run(
+      makeScript('node -e "require(\'net\').connect(80, \'93.184.216.34\').on(\'error\', () => process.exit(0))"'),
+      tmpDir,
+    )
+
+    expect(result.sandboxReport?.audited).toBe(true)
+    expect(result.sandboxReport?.blockedConnections.length).toBeGreaterThan(0)
+    expect(result.sandboxReport?.status).toBe('warned')
+  }, 60_000)
+
+  it('auditSyscalls: real strace trace records a clean in-package file write', async () => {
+    const rc = { ...defaultRc(), sandbox: { ...defaultRc().sandbox, auditSyscalls: true } }
+    const runner = new SandboxRunner(docker, rc)
+
+    const result = await runner.run(makeScript('echo hi > /sandbox/package/audit-out.txt'), tmpDir)
+
+    expect(result.sandboxReport?.audited).toBe(true)
+    expect(result.sandboxReport?.filesWritten.some(f => f.includes('audit-out.txt'))).toBe(true)
+    expect(result.sandboxReport?.status).toBe('clean')
+  }, 60_000)
 })

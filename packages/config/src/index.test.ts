@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import * as fs from 'fs/promises'
 import * as path from 'path'
 import * as os from 'os'
-import { loadRc, saveRc, defaultRc, mergeRc, loadGlobalConfig } from './index.js'
+import { loadRc, saveRc, defaultRc, mergeRc, loadGlobalConfig, matchesHostPlatform } from './index.js'
 
 let tmpDir: string
 
@@ -20,6 +20,7 @@ describe('defaultRc', () => {
     expect(rc.version).toBe(1)
     expect(rc.sandbox.memory).toBe('1g')
     expect(rc.sandbox.networkMode).toBe('isolated')
+    expect(rc.sandbox.auditSyscalls).toBe(false)
     expect(rc.cache.enabled).toBe(true)
     expect(rc.whitelist).toEqual([])
     expect(rc.blacklist).toEqual([])
@@ -29,7 +30,7 @@ describe('defaultRc', () => {
 describe('mergeRc', () => {
   it('deep-merges sandbox overrides', () => {
     const base = defaultRc()
-    const result = mergeRc(base, { sandbox: { memory: '2g', cpus: 2.0, timeout: 60, networkMode: 'none' } })
+    const result = mergeRc(base, { sandbox: { memory: '2g', cpus: 2.0, timeout: 60, networkMode: 'none', auditSyscalls: false } })
     expect(result.sandbox.memory).toBe('2g')
     expect(result.sandbox.cpus).toBe(2.0)
     // other fields from base are preserved
@@ -93,7 +94,7 @@ describe('saveRc / loadRc round-trip', () => {
   it('saves and reloads identical config', async () => {
     const rc = mergeRc(defaultRc(), {
       whitelist: ['trusted-pkg'],
-      sandbox: { memory: '2g', cpus: 2, timeout: 60, networkMode: 'restricted' },
+      sandbox: { memory: '2g', cpus: 2, timeout: 60, networkMode: 'restricted', auditSyscalls: false },
     })
     await saveRc(tmpDir, rc)
     const loaded = await loadRc(tmpDir)
@@ -108,5 +109,31 @@ describe('loadGlobalConfig', () => {
     const config = await loadGlobalConfig()
     expect(config.storeDir).toContain('.sandboxpm')
     expect(config.cacheDir).toContain('.sandboxpm')
+  })
+})
+
+describe('matchesHostPlatform', () => {
+  it('matches when the positive os list includes the host', () => {
+    expect(matchesHostPlatform({ os: ['win32', 'linux'] }, { os: 'win32', cpu: 'x64' })).toBe(true)
+    expect(matchesHostPlatform({ os: ['linux'] }, { os: 'win32', cpu: 'x64' })).toBe(false)
+  })
+
+  it('respects "!value" negation', () => {
+    expect(matchesHostPlatform({ os: ['!win32'] }, { os: 'linux', cpu: 'x64' })).toBe(true)
+    expect(matchesHostPlatform({ os: ['!win32'] }, { os: 'win32', cpu: 'x64' })).toBe(false)
+  })
+
+  it('rejects a libc constraint on a non-linux host', () => {
+    expect(matchesHostPlatform({ os: ['darwin'], libc: ['musl'] }, { os: 'darwin', cpu: 'arm64' })).toBe(false)
+  })
+
+  it('matches libc on linux, defaulting the host to glibc when undetected', () => {
+    expect(matchesHostPlatform({ os: ['linux'], libc: ['glibc'] }, { os: 'linux', cpu: 'x64' })).toBe(true)
+    expect(matchesHostPlatform({ os: ['linux'], libc: ['musl'] }, { os: 'linux', cpu: 'x64', libc: 'glibc' })).toBe(false)
+  })
+
+  it('treats absent or empty constraint lists as matching everything', () => {
+    expect(matchesHostPlatform({}, { os: 'win32', cpu: 'arm64' })).toBe(true)
+    expect(matchesHostPlatform({ os: [] }, { os: 'win32', cpu: 'arm64' })).toBe(true)
   })
 })

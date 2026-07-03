@@ -87,6 +87,12 @@ export class Linker {
       if (!resolvedVersion) continue
 
       const key = `${dep.name}@${resolvedVersion}`
+      // A direct dep resolved into the tree but never fetched (e.g. an optional
+      // platform package that doesn't match this host — see resolver/fetcher) has
+      // nothing under sandboxpmDir to point at; skip it rather than create a symlink
+      // dangling at a target that was never created.
+      if (!fetchResults.has(key)) continue
+
       const targetDir = path.join(sandboxpmDir, key, 'node_modules', dep.name)
       const symlinkPath = path.join(nodeModules, dep.name)
 
@@ -94,13 +100,19 @@ export class Linker {
       result.symlinksCreated++
     }
 
-    // Step 3: Symlink transitive deps inside each package's own node_modules/
+    // Step 3: Symlink transitive deps (including optionalDependencies — e.g. a
+    // platform binary package like @swc/core-win32-x64-msvc — inside each package's
+    // own node_modules/
     for (const [key, pkg] of tree.packages) {
       const pkgNodeModules = path.join(sandboxpmDir, key, 'node_modules')
+      const allDeps = { ...pkg.dependencies, ...pkg.optionalDependencies }
 
-      for (const [depName, depVersion] of Object.entries(pkg.dependencies)) {
+      for (const [depName, depVersion] of Object.entries(allDeps)) {
         const depKey = `${depName}@${depVersion}`
         if (!tree.packages.has(depKey)) continue
+        // Same "was it actually fetched" guard as Step 2 — an unfetched platform
+        // sibling must not get a dangling symlink.
+        if (!fetchResults.has(depKey)) continue
 
         const targetDir = path.join(sandboxpmDir, depKey, 'node_modules', depName)
         const symlinkPath = path.join(pkgNodeModules, depName)
@@ -113,7 +125,7 @@ export class Linker {
       }
     }
 
-    // Step 4: Bin links
+    // Step 4: Bin links for direct project deps into the root node_modules/.bin
     for (const [key, pkg] of tree.packages) {
       if (!directDepNames.has(pkg.name)) continue
 
@@ -122,6 +134,23 @@ export class Linker {
 
       const pkgDir = path.join(sandboxpmDir, key, 'node_modules', pkg.name)
       await this._linkBins(pkgDir, pkg, nodeModules, result)
+    }
+
+    // Step 4b: Per-package bin links — populate each package's sibling
+    // node_modules/.bin with its direct deps' executables.
+    // Required so lifecycle scripts (node-pre-gyp, prebuild-install, node-gyp)
+    // are found when running install scripts inside the package directory.
+    for (const [key, pkg] of tree.packages) {
+      const pkgNodeModules = path.join(sandboxpmDir, key, 'node_modules')
+      const allDeps = { ...pkg.dependencies, ...pkg.optionalDependencies }
+      for (const [depName, depVersion] of Object.entries(allDeps)) {
+        const depKey = `${depName}@${depVersion}`
+        if (!fetchResults.has(depKey)) continue
+        const depPkg = tree.packages.get(depKey)
+        if (!depPkg) continue
+        const depPkgDir = path.join(sandboxpmDir, depKey, 'node_modules', depPkg.name)
+        await this._linkBins(depPkgDir, depPkg, pkgNodeModules, result)
+      }
     }
 
     return result

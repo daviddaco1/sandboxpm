@@ -1,7 +1,7 @@
 {
   "defaultAction": "SCMP_ACT_ERRNO",
   "architectures": ["SCMP_ARCH_X86_64", "SCMP_ARCH_X86", "SCMP_ARCH_X32"],
-  "comment": "sandboxpm script sandbox seccomp profile — allows only syscalls needed by npm install scripts",
+  "comment": "sandboxpm script sandbox seccomp profile, audit variant — same as seccomp.json but allows ptrace so strace can trace the script it launches. Used only when sandbox.auditSyscalls is enabled, alongside CapAdd:['SYS_PTRACE']. Never used as the default profile.",
   "syscalls": [
     {
       "names": [
@@ -48,7 +48,8 @@
         "mlock2", "copy_file_range", "preadv2", "pwritev2",
         "statx", "io_pgetevents", "rseq", "pidfd_send_signal",
         "io_uring_setup", "io_uring_enter", "io_uring_register",
-        "openat2", "pidfd_getfd", "faccessat2", "close_range"
+        "openat2", "pidfd_getfd", "faccessat2", "close_range",
+        "ptrace"
       ],
       "action": "SCMP_ACT_ALLOW"
     },
@@ -59,9 +60,8 @@
       "errnoRet": 38
     },
     {
-      "comment": "Explicitly BLOCK dangerous syscalls",
+      "comment": "Explicitly BLOCK dangerous syscalls (same as the default profile, minus ptrace)",
       "names": [
-        "ptrace",
         "process_vm_readv",
         "process_vm_writev",
         "mount",

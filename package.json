@@ -13,7 +13,9 @@
     "test:e2e": "SANDBOXPM_E2E=1 vitest run packages/cli/src/install.e2e.test.ts",
     "test:docker": "DOCKER_INTEGRATION=1 vitest run packages/scripts/src/docker.integration.test.ts",
     "lint": "eslint packages/*/src/**/*.ts",
-    "clean": "rimraf packages/*/dist packages/*/*.tsbuildinfo"
+    "clean": "rimraf packages/*/dist packages/*/*.tsbuildinfo",
+    "sync-assets": "node scripts/sync-docker-assets.mjs",
+    "sync-assets:check": "node scripts/sync-docker-assets.mjs --check"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

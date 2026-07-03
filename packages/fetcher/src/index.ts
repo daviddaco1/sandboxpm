@@ -19,14 +19,18 @@ import pLimit from 'p-limit'
 import type { CASStore } from '@sandboxpm/store'
 import { hashFile } from '@sandboxpm/store'
 import type { RegistryConfig } from '@sandboxpm/config'
+import { getHostPlatform, matchesHostPlatform } from '@sandboxpm/config'
 
 export interface PackageId {
   name: string
   version: string       // exact resolved version e.g. "4.18.2"
+  os?: string[]          // optionalDependencies platform constraint, e.g. ["win32"]
+  cpu?: string[]
+  libc?: string[]
 }
 
 export interface PackageScript {
-  lifecycle: 'preinstall' | 'install' | 'postinstall' | 'prepare'
+  lifecycle: 'preinstall' | 'install' | 'postinstall'
   command: string
   inspectUrl: string
 }
@@ -66,7 +70,7 @@ interface PackumentVersion {
 }
 
 const INSTALL_SCRIPTS: Array<PackageScript['lifecycle']> = [
-  'preinstall', 'install', 'postinstall', 'prepare',
+  'preinstall', 'install', 'postinstall',
 ]
 
 export function buildInspectUrl(name: string, version: string, scriptCommand: string): string {
@@ -97,8 +101,16 @@ export class Fetcher extends EventEmitter {
   }
 
   async *fetch(packages: PackageId[]): AsyncIterable<FetchResult> {
+    // A multi-platform lockfile (see resolver) records every platform variant of an
+    // optional dependency; only the current host's actually gets downloaded. Filtering
+    // before fetchOne() means a mismatched sibling never even triggers an HTTP request
+    // — this must stay silent, since most entries in a multi-platform lock won't match
+    // any given host.
+    const host = getHostPlatform()
+    const matching = packages.filter(pkg => matchesHostPlatform(pkg, host))
+
     const limit = pLimit(this.concurrency)
-    const results: Array<Promise<FetchResult>> = packages.map(pkg =>
+    const results: Array<Promise<FetchResult>> = matching.map(pkg =>
       limit(() => this.fetchOne(pkg))
     )
 
@@ -154,7 +166,12 @@ export class Fetcher extends EventEmitter {
         }
         const allPresent = await Promise.all(cached.files.map(f => this.store.has(f.hash)))
         if (allPresent.every(Boolean)) {
-          return { packageId: pkg, files: cached.files, scripts: cached.scripts, fromCache: true }
+          // Filter against current INSTALL_SCRIPTS so removing a lifecycle
+          // (e.g. 'prepare') takes effect without requiring a cache clear.
+          const scripts = cached.scripts.filter(
+            s => (INSTALL_SCRIPTS as readonly string[]).includes(s.lifecycle)
+          )
+          return { packageId: pkg, files: cached.files, scripts, fromCache: true }
         }
       } catch {
         // Manifest missing or malformed → proceed with download

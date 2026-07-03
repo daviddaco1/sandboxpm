@@ -49,7 +49,7 @@ async function makeTarball(files: Record<string, string>): Promise<{ tgzPath: st
 
 function mockFetch(tgzPath: string, integrity: string) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  vi.spyOn(global, 'fetch' as any).mockImplementation(async (url: string) => {
+  return vi.spyOn(global, 'fetch' as any).mockImplementation(async (url: string) => {
     if (url.includes('registry.npmjs.org') && !url.endsWith('.tgz')) {
       // packument version endpoint
       const body: object = {
@@ -214,5 +214,36 @@ describe('Fetcher.fetch (async iterable)', () => {
       results.push(r)
     }
     expect(results).toHaveLength(2)
+  })
+})
+
+describe('Fetcher.fetch — platform filtering', () => {
+  it('skips a package whose os constraint never matches the real test host, silently', async () => {
+    const { tgzPath, integrity } = await makeTarball({
+      'package/package.json': JSON.stringify({ name: 'a', version: '1.0.0' }),
+      'package/index.js': 'module.exports = 1',
+    })
+
+    const fetchSpy = mockFetch(tgzPath, integrity)
+
+    const fetcher = new Fetcher(store, [], { tmpDir, concurrency: 2 })
+    const packages = [
+      { name: 'a', version: '1.0.0' },                          // no constraint — always matches
+      { name: 'never-matches', version: '1.0.0', os: ['zos'] },  // z/OS — never the real test host
+    ]
+
+    const warnSpy = vi.spyOn(console, 'warn')
+    const errorSpy = vi.spyOn(console, 'error')
+
+    const results = []
+    for await (const r of fetcher.fetch(packages)) {
+      results.push(r)
+    }
+
+    expect(results).toHaveLength(1)
+    expect(results[0]?.packageId.name).toBe('a')
+    expect(fetchSpy).not.toHaveBeenCalledWith(expect.stringContaining('never-matches'), expect.anything())
+    expect(warnSpy).not.toHaveBeenCalled()
+    expect(errorSpy).not.toHaveBeenCalled()
   })
 })

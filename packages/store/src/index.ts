@@ -92,7 +92,11 @@ export class CASStore {
     } catch (err) {
       const e = err as NodeJS.ErrnoException
       if (e.code === 'EEXIST') return  // already linked, fine
-      if (e.code === 'EXDEV') {
+      if (e.code === 'EXDEV' || e.code === 'UNKNOWN' || e.code === 'EPERM') {
+        // EXDEV  — cross-device (store and project on different volumes)
+        // UNKNOWN — Windows error when destination is inside OneDrive or other
+        //           cloud-synced folder that blocks hard links
+        // EPERM  — Windows Developer Mode off or filesystem doesn't support links
         await fs.copyFile(src, destPath)
         return
       }

@@ -154,20 +154,7 @@ export async function install(flags: InstallFlags = {}): Promise<void> {
     process.exit(1)
   }
 
-  // 3. Script prompt
-  const allScripts: TaggedScript[] = []
-  for (const result of fetchResults.values()) {
-    for (const script of result.scripts) {
-      allScripts.push({ ...script, name: result.packageId.name, version: result.packageId.version })
-    }
-  }
-  const scriptResults = await scriptPrompt.promptAll(allScripts)
-  // Persist any whitelist/blacklist decisions the user made during the prompt
-  if (allScripts.length > 0) {
-    await saveRc(cwd, rc)
-  }
-
-  // 4. Link
+  // 3. Link
   spinner = ora('Linking node_modules...').start()
   let linkResult
   try {
@@ -181,6 +168,23 @@ export async function install(flags: InstallFlags = {}): Promise<void> {
     process.exit(1)
   }
 
+  // 4. Script prompt — runs after linking so package files are present on disk
+  const nodeModules = path.join(cwd, 'node_modules')
+  const sandboxpmDir = path.join(nodeModules, '.sandboxpm')
+  const allScripts: TaggedScript[] = []
+  for (const result of fetchResults.values()) {
+    const { name, version } = result.packageId
+    const packageDir = path.join(sandboxpmDir, `${name}@${version}`, 'node_modules', name)
+    for (const script of result.scripts) {
+      allScripts.push({ ...script, name, version, packageDir })
+    }
+  }
+  const scriptResults = await scriptPrompt.promptAll(allScripts)
+  // Persist any whitelist/blacklist decisions the user made during the prompt
+  if (allScripts.length > 0) {
+    await saveRc(cwd, rc)
+  }
+
   // 5. Summary
   const elapsed = ((Date.now() - startMs) / 1000).toFixed(1)
   const newCount = fetchResults.size - fromStoreCount
@@ -191,15 +195,23 @@ export async function install(flags: InstallFlags = {}): Promise<void> {
   console.log(chalk.gray(`  └── ${fromStoreCount} linked from store (0 bytes downloaded)`))
 
   if (scriptResults.length > 0) {
-    const ran     = scriptResults.filter(r => (r.decision === 'run' || r.decision === 'whitelisted') && r.sandboxReport?.status !== 'blocked')
-    const blocked = scriptResults.filter(r => r.sandboxReport?.status === 'blocked')
-    const skipped = scriptResults.filter(r => r.decision === 'skip' || r.decision === 'blacklisted')
-    const all = [...ran, ...skipped, ...blocked]
+    const ranResults = scriptResults.filter(r => (r.decision === 'run' || r.decision === 'whitelisted') && r.sandboxReport?.status !== 'blocked')
+    const succeeded  = ranResults.filter(r => (r.exitCode ?? 0) === 0)
+    const failed     = ranResults.filter(r => (r.exitCode ?? 0) !== 0)
+    const blocked    = scriptResults.filter(r => r.sandboxReport?.status === 'blocked')
+    const skipped    = scriptResults.filter(r => r.decision === 'skip' || r.decision === 'blacklisted')
+    const all = [...ranResults, ...skipped, ...blocked]
     console.log()
     console.log(chalk.yellow(`⚠  ${all.length} packages had install scripts:`))
-    for (const r of ran) {
+    for (const r of succeeded) {
       const dur = r.durationMs ? ` (${(r.durationMs / 1000).toFixed(1)}s)` : ''
-      console.log(chalk.green(`  ├── ✓ ${r.packageId} ${r.lifecycle} — ran in sandbox${dur}`))
+      const label = r.nativeRun ? 'ran natively (no sandbox)' : 'ran in sandbox'
+      console.log(chalk.green(`  ├── ✓ ${r.packageId} ${r.lifecycle} — ${label}${dur}`))
+    }
+    for (const r of failed) {
+      const dur = r.durationMs ? ` (${(r.durationMs / 1000).toFixed(1)}s)` : ''
+      const label = r.nativeRun ? 'native run' : 'script'
+      console.log(chalk.yellow(`  ├── ✗ ${r.packageId} ${r.lifecycle} — ${label} exited ${r.exitCode}${dur}`))
     }
     for (const r of skipped) {
       console.log(chalk.gray(`  ├── – ${r.packageId} ${r.lifecycle} — skipped by user`))
@@ -410,10 +422,16 @@ async function auditReports(): Promise<void> {
       ) as ScriptRunResult
       const dur = r.durationMs ? `${(r.durationMs / 1000).toFixed(1)}s` : '-'
       const exitIcon = r.exitCode === 0 ? chalk.green('✓') : chalk.red('✗')
+      // Real syscall-audit data only exists when sandbox.auditSyscalls was on and
+      // the report's Linux trace parsed successfully — otherwise `status` is the
+      // cosmetic default, so say so rather than implying every run was checked.
+      const auditNote = r.sandboxReport !== undefined && r.sandboxReport.audited !== true
+        ? chalk.gray(' (unaudited)')
+        : ''
       console.log(
         `${exitIcon} ${r.packageId} ${r.lifecycle}` +
         ` — ${r.decision} | exit=${r.exitCode ?? '-'} | ${dur}` +
-        ` | ${r.sandboxReport?.status ?? '-'}`
+        ` | ${r.sandboxReport?.status ?? '-'}${auditNote}`
       )
     } catch {
       // skip malformed report files

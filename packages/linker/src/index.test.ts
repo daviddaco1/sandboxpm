@@ -35,7 +35,7 @@ async function storeFile(content: string): Promise<{ hash: string; size: number 
 }
 
 function makeTree(opts: {
-  packages: Array<{ name: string; version: string; deps?: Record<string, string> }>
+  packages: Array<{ name: string; version: string; deps?: Record<string, string>; optionalDeps?: Record<string, string> }>
   directDeps?: Array<{ name: string; range: string; type?: DependencyRange['type'] }>
 }): ResolvedTree {
   const packages = new Map<string, ResolvedPackage>()
@@ -46,6 +46,7 @@ function makeTree(opts: {
       resolved: `https://registry.npmjs.org/${p.name}/-/${p.name}-${p.version}.tgz`,
       integrity: `sha512-fake`,
       dependencies: p.deps ?? {},
+      ...(p.optionalDeps ? { optionalDependencies: p.optionalDeps } : {}),
     })
   }
   const directDeps: DependencyRange[] = (opts.directDeps ?? opts.packages.map(p => ({
@@ -197,6 +198,78 @@ describe('Linker.link — transitive dependency symlinks', () => {
     )
     const stat = await fs.lstat(crossLink)
     expect(stat.isSymbolicLink()).toBe(true)
+  })
+})
+
+describe('Linker.link — optionalDependencies (platform variants)', () => {
+  it('symlinks an optional dep into its parent node_modules when it was fetched', async () => {
+    const { hash } = await storeFile('native binary stub')
+    const projectDir = path.join(tmpDir, 'project')
+    await fs.mkdir(projectDir)
+
+    // native-pkg optionally depends on native-pkg-win32-x64, and it matched this host
+    const tree = makeTree({
+      packages: [
+        { name: 'native-pkg', version: '1.0.0', optionalDeps: { 'native-pkg-win32-x64': '1.0.0' } },
+        { name: 'native-pkg-win32-x64', version: '1.0.0' },
+      ],
+      directDeps: [{ name: 'native-pkg', range: '^1.0.0', type: 'prod' }],
+    })
+    const fetchResults = makeFetchResults([
+      { name: 'native-pkg', version: '1.0.0', files: [{ relativePath: 'index.js', hash }] },
+      { name: 'native-pkg-win32-x64', version: '1.0.0', files: [{ relativePath: 'binding.node', hash }] },
+    ])
+
+    await linker.link(tree, fetchResults, { projectDir, includeDevDependencies: true })
+
+    const crossLink = path.join(
+      projectDir, 'node_modules', '.sandboxpm', 'native-pkg@1.0.0', 'node_modules', 'native-pkg-win32-x64'
+    )
+    const stat = await fs.lstat(crossLink)
+    expect(stat.isSymbolicLink()).toBe(true)
+  })
+
+  it('creates no dangling symlink for an optional dep that was resolved but never fetched (wrong platform)', async () => {
+    const { hash } = await storeFile('index')
+    const projectDir = path.join(tmpDir, 'project')
+    await fs.mkdir(projectDir)
+
+    // native-pkg-linux-x64 is in the resolved tree (multi-platform lock) but this
+    // "host" never fetched it — simulates the fetcher's platform filter at work.
+    const tree = makeTree({
+      packages: [
+        { name: 'native-pkg', version: '1.0.0', optionalDeps: { 'native-pkg-linux-x64': '1.0.0' } },
+        { name: 'native-pkg-linux-x64', version: '1.0.0' },
+      ],
+      directDeps: [{ name: 'native-pkg', range: '^1.0.0', type: 'prod' }],
+    })
+    const fetchResults = makeFetchResults([
+      { name: 'native-pkg', version: '1.0.0', files: [{ relativePath: 'index.js', hash }] },
+      // native-pkg-linux-x64 deliberately has no entry here
+    ])
+
+    await linker.link(tree, fetchResults, { projectDir, includeDevDependencies: true })
+
+    const crossLink = path.join(
+      projectDir, 'node_modules', '.sandboxpm', 'native-pkg@1.0.0', 'node_modules', 'native-pkg-linux-x64'
+    )
+    await expect(fs.lstat(crossLink)).rejects.toThrow(/ENOENT/)
+  })
+
+  it('creates no root symlink for a direct optional dep that was never fetched', async () => {
+    const projectDir = path.join(tmpDir, 'project')
+    await fs.mkdir(projectDir)
+
+    const tree = makeTree({
+      packages: [{ name: 'never-fetched', version: '1.0.0' }],
+      directDeps: [{ name: 'never-fetched', range: '^1.0.0', type: 'optional' }],
+    })
+    const fetchResults = makeFetchResults([]) // nothing fetched at all
+
+    await linker.link(tree, fetchResults, { projectDir, includeDevDependencies: true })
+
+    const symlinkPath = path.join(projectDir, 'node_modules', 'never-fetched')
+    await expect(fs.lstat(symlinkPath)).rejects.toThrow(/ENOENT/)
   })
 })
 

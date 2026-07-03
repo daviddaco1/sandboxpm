@@ -6,6 +6,7 @@
  */
 
 import * as fs from 'fs/promises'
+import { existsSync } from 'fs'
 import * as path from 'path'
 import * as os from 'os'
 import * as yaml from 'js-yaml'
@@ -15,6 +16,7 @@ export interface SandboxConfig {
   cpus: number          // e.g. 1.0
   timeout: number       // seconds
   networkMode: 'isolated' | 'restricted' | 'none'
+  auditSyscalls: boolean  // Linux only; traces the script with strace for a real SandboxReport
 }
 
 export interface PoliciesConfig {
@@ -59,6 +61,7 @@ export function defaultRc(): SandboxpmRc {
       cpus: 1.0,
       timeout: 120,
       networkMode: 'isolated',
+      auditSyscalls: false,
     },
     policies: {
       onWarn: 'prompt',
@@ -204,4 +207,52 @@ export async function saveGlobalConfig(config: GlobalConfig): Promise<void> {
   const tmp = `${GLOBAL_CONFIG_PATH}.tmp`
   await fs.writeFile(tmp, JSON.stringify(config, null, 2), 'utf8')
   await fs.rename(tmp, GLOBAL_CONFIG_PATH)
+}
+
+// ─── Platform matching (npm-style os/cpu/libc optionalDependencies) ──────────
+
+export interface HostPlatform {
+  os: string                    // process.platform
+  cpu: string                   // process.arch
+  libc?: 'glibc' | 'musl'       // set only when os === 'linux'
+}
+
+export interface PlatformConstraints {
+  os?: string[]
+  cpu?: string[]
+  libc?: string[]
+}
+
+let cachedHost: HostPlatform | undefined
+
+export function getHostPlatform(): HostPlatform {
+  if (cachedHost) return cachedHost
+  const host: HostPlatform = { os: process.platform, cpu: process.arch }
+  if (process.platform === 'linux') {
+    // ponytail: alpine-release presence is the standard fast musl signal; swap for a
+    // syscall-based check (like the `detect-libc` package) if this ever misfires.
+    host.libc = existsSync('/etc/alpine-release') ? 'musl' : 'glibc'
+  }
+  cachedHost = host
+  return host
+}
+
+function matchesList(list: string[] | undefined, value: string): boolean {
+  if (!list || list.length === 0) return true
+  const negated = list.filter(v => v.startsWith('!'))
+  const positive = list.filter(v => !v.startsWith('!'))
+  if (negated.some(v => v.slice(1) === value)) return false
+  if (positive.length > 0 && !positive.includes(value)) return false
+  return true
+}
+
+/** npm-style os/cpu/libc matching for optionalDependencies (supports "!value" negation). */
+export function matchesHostPlatform(pkg: PlatformConstraints, host: HostPlatform): boolean {
+  if (!matchesList(pkg.os, host.os)) return false
+  if (!matchesList(pkg.cpu, host.cpu)) return false
+  if (pkg.libc && pkg.libc.length > 0) {
+    if (host.os !== 'linux') return false
+    if (!matchesList(pkg.libc, host.libc ?? 'glibc')) return false
+  }
+  return true
 }

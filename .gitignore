@@ -2,6 +2,9 @@
 dist/
 *.tsbuildinfo
 
+# testing
+test-project/
+
 # Dependencies
 node_modules/
 

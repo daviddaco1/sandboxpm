@@ -35,6 +35,9 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      - name: Docker sandbox assets in sync
+        run: pnpm sync-assets:check
+
       - name: Test
         run: pnpm test
 

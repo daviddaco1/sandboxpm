@@ -24,9 +24,11 @@ export interface ResolvedPackage {
   integrity: string
   dependencies: Record<string, string>
   devDependencies?: Record<string, string>
+  optionalDependencies?: Record<string, string>
   scripts?: Record<string, string>
   cpu?: string[]
   os?: string[]
+  libc?: string[]
 }
 
 export interface ResolvedTree {
@@ -49,6 +51,9 @@ export interface LockfileEntry {
   optionalDependencies?: Record<string, string>
   hasBin?: boolean
   scripts?: Record<string, string>
+  cpu?: string[]
+  os?: string[]
+  libc?: string[]
 }
 
 // Minimal npm registry packument shape
@@ -64,6 +69,7 @@ interface PackumentVersion {
   bin?: string | Record<string, string>
   cpu?: string[]
   os?: string[]
+  libc?: string[]
 }
 
 interface Packument {
@@ -158,8 +164,12 @@ export class Resolver {
     // resolvedVersions maps name → version for dedup (first/highest wins per range group)
     const resolvedVersions = new Map<string, string>() // name → exact version
 
-    type QueueItem = { name: string; range: string; isPeer?: boolean }
-    const queue: QueueItem[] = directDeps.map(d => ({ name: d.name, range: d.range }))
+    type QueueItem = { name: string; range: string; isPeer?: boolean; isOptional?: boolean }
+    const queue: QueueItem[] = directDeps.map(d => ({
+      name: d.name,
+      range: d.range,
+      isOptional: d.type === 'optional',
+    }))
     const visiting = new Set<string>() // prevent infinite loops
 
     while (queue.length > 0) {
@@ -173,12 +183,14 @@ export class Resolver {
         continue  // dedup — reuse the existing version
       }
 
+      const kind = item.isPeer ? 'peer dep' : 'optional dep'
+
       let packument: Packument
       try {
         packument = await this.fetchPackument(name)
       } catch (err) {
-        if (item.isPeer) {
-          console.warn(`[sandboxpm] peer dep warning: failed to fetch "${name}" — ${(err as Error).message}`)
+        if (item.isPeer || item.isOptional) {
+          console.warn(`[sandboxpm] ${kind} warning: failed to fetch "${name}" — ${(err as Error).message}`)
           continue
         }
         throw err
@@ -186,8 +198,8 @@ export class Resolver {
 
       const version = this.selectVersion(packument, range)
       if (!version) {
-        if (item.isPeer) {
-          console.warn(`[sandboxpm] peer dep warning: no version of "${name}" satisfies "${range}" — skipping`)
+        if (item.isPeer || item.isOptional) {
+          console.warn(`[sandboxpm] ${kind} warning: no version of "${name}" satisfies "${range}" — skipping`)
           continue
         }
         throw new Error(`No version of "${name}" satisfies range "${range}"`)
@@ -204,15 +216,27 @@ export class Resolver {
 
       const depVersions: Record<string, string> = {}
       for (const [depName, depRange] of Object.entries(pv.dependencies ?? {})) {
-        queue.push({ name: depName, range: depRange })
+        // A required dep OF an optional platform package inherits that optional status —
+        // it can't fail to resolve and abort the whole install any more than its parent can.
+        queue.push({ name: depName, range: depRange, ...(item.isOptional ? { isOptional: true } : {}) })
         depVersions[depName] = depRange
       }
 
       // Enqueue peer deps only if not already resolved; unsatisfiable peers warn, never throw
       for (const [depName, depRange] of Object.entries(pv.peerDependencies ?? {})) {
         if (!resolvedVersions.has(depName)) {
-          queue.push({ name: depName, range: depRange, isPeer: true })
+          queue.push({ name: depName, range: depRange, isPeer: true, ...(item.isOptional ? { isOptional: true } : {}) })
         }
+      }
+
+      // Platform-specific native binary packages (e.g. @swc/core-win32-x64-msvc,
+      // @img/sharp-win32-x64) are declared here rather than downloaded by an install
+      // script — every variant gets resolved into the lockfile (multi-platform, pnpm-style);
+      // the fetcher decides at install time which ones actually match the current host.
+      const optDepVersions: Record<string, string> = {}
+      for (const [depName, depRange] of Object.entries(pv.optionalDependencies ?? {})) {
+        queue.push({ name: depName, range: depRange, isOptional: true })
+        optDepVersions[depName] = depRange
       }
 
       const integrity = pv.dist.integrity ?? (pv.dist.shasum ? `sha1-${pv.dist.shasum}` : '')
@@ -227,6 +251,8 @@ export class Resolver {
       if (pv.scripts) pkg.scripts = pv.scripts
       if (pv.cpu) pkg.cpu = pv.cpu
       if (pv.os) pkg.os = pv.os
+      if (pv.libc) pkg.libc = pv.libc
+      if (Object.keys(optDepVersions).length > 0) pkg.optionalDependencies = optDepVersions
       resolved.set(key, pkg)
 
       // Record this version for future dedup (if no existing or existing doesn't satisfy)
@@ -235,14 +261,48 @@ export class Resolver {
       }
     }
 
-    // Second pass: resolve dep version ranges to exact versions
+    // Second pass: resolve dep version ranges to exact versions.
+    // Prefer the globally-deduped version (the pnpm-style happy path — most
+    // packages share one copy), but fall back to a version that actually
+    // satisfies THIS package's own range when the global winner doesn't:
+    // e.g. minizlib needs minipass@^3.0.0 while some other dep pinned the
+    // shared "minipass" slot to 5.0.0 — blindly using the global version here
+    // would wire minizlib up to a minipass major it never resolved against.
     for (const pkg of resolved.values()) {
       const exactDeps: Record<string, string> = {}
       for (const [depName, depRange] of Object.entries(pkg.dependencies)) {
-        const exact = resolvedVersions.get(depName)
-        exactDeps[depName] = exact ?? depRange
+        const globalVersion = resolvedVersions.get(depName)
+        if (globalVersion && semver.satisfies(globalVersion, depRange)) {
+          exactDeps[depName] = globalVersion
+        } else {
+          const candidates = [...resolved.keys()]
+            .filter(k => k.startsWith(`${depName}@`))
+            .map(k => k.slice(depName.length + 1))
+          exactDeps[depName] = semver.maxSatisfying(candidates, depRange) ?? globalVersion ?? depRange
+        }
       }
       pkg.dependencies = exactDeps
+    }
+
+    // Third pass: resolve each package's OWN optionalDependencies ranges to exact
+    // versions. Unlike the required-dependencies pass above, a range that never
+    // resolved isn't a bug to fall back on — it's the normal outcome for "wrong
+    // platform" or "404", so it's dropped rather than written as a dangling range.
+    for (const pkg of resolved.values()) {
+      if (!pkg.optionalDependencies) continue
+      const exactOptDeps: Record<string, string> = {}
+      for (const [depName, depRange] of Object.entries(pkg.optionalDependencies)) {
+        const candidates = [...resolved.keys()]
+          .filter(k => k.startsWith(`${depName}@`))
+          .map(k => k.slice(depName.length + 1))
+        const match = semver.maxSatisfying(candidates, depRange)
+        if (match) exactOptDeps[depName] = match
+      }
+      if (Object.keys(exactOptDeps).length > 0) {
+        pkg.optionalDependencies = exactOptDeps
+      } else {
+        delete pkg.optionalDependencies
+      }
     }
 
     const lockfileHash = await this._writeLockfile(projectDir, resolved)
@@ -258,6 +318,7 @@ export class Resolver {
   async resolveFromLock(lockfilePath: string): Promise<ResolvedTree> {
     const content = await fs.readFile(lockfilePath, 'utf8')
     const lockfile = JSON.parse(content) as Lockfile
+    const projectDir = path.dirname(lockfilePath)
 
     const packages = new Map<string, ResolvedPackage>()
     for (const [key, entry] of Object.entries(lockfile.packages)) {
@@ -273,13 +334,42 @@ export class Resolver {
         dependencies: entry.dependencies ?? {},
       }
       if (entry.scripts) pkg.scripts = entry.scripts
+      if (entry.optionalDependencies) pkg.optionalDependencies = entry.optionalDependencies
+      if (entry.os) pkg.os = entry.os
+      if (entry.cpu) pkg.cpu = entry.cpu
+      if (entry.libc) pkg.libc = entry.libc
       packages.set(key, pkg)
     }
 
+    // Read package.json alongside the lockfile so the linker can create
+    // the root node_modules/{name} junctions/symlinks for direct deps.
+    // Without this, directDeps would be empty and Node.js can't find any package.
+    const directDeps: DependencyRange[] = []
+    try {
+      const pkgJson = JSON.parse(
+        await fs.readFile(path.join(projectDir, 'package.json'), 'utf8')
+      ) as {
+        dependencies?: Record<string, string>
+        devDependencies?: Record<string, string>
+        optionalDependencies?: Record<string, string>
+      }
+      for (const [name, range] of Object.entries(pkgJson.dependencies ?? {})) {
+        directDeps.push({ name, range, type: 'prod' })
+      }
+      for (const [name, range] of Object.entries(pkgJson.devDependencies ?? {})) {
+        directDeps.push({ name, range, type: 'dev' })
+      }
+      for (const [name, range] of Object.entries(pkgJson.optionalDependencies ?? {})) {
+        directDeps.push({ name, range, type: 'optional' })
+      }
+    } catch {
+      // No package.json alongside lockfile — directDeps stays empty
+    }
+
     return {
-      root: path.dirname(lockfilePath),
+      root: projectDir,
       packages,
-      directDeps: [],
+      directDeps,
       lockfileHash: crypto.createHash('sha256').update(content).digest('hex'),
     }
   }
@@ -302,9 +392,15 @@ export class Resolver {
       if (Object.keys(pkg.dependencies).length > 0) {
         entry.dependencies = sortObjectKeys(pkg.dependencies)
       }
+      if (pkg.optionalDependencies && Object.keys(pkg.optionalDependencies).length > 0) {
+        entry.optionalDependencies = sortObjectKeys(pkg.optionalDependencies)
+      }
       if (pkg.scripts && Object.keys(pkg.scripts).length > 0) {
         entry.scripts = pkg.scripts
       }
+      if (pkg.os) entry.os = pkg.os
+      if (pkg.cpu) entry.cpu = pkg.cpu
+      if (pkg.libc) entry.libc = pkg.libc
       packages[key] = entry
     }
 

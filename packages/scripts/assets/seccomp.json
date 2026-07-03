@@ -1,5 +1,6 @@
 {
   "defaultAction": "SCMP_ACT_ERRNO",
+  "architectures": ["SCMP_ARCH_X86_64", "SCMP_ARCH_X86", "SCMP_ARCH_X32"],
   "comment": "sandboxpm script sandbox seccomp profile — allows only syscalls needed by npm install scripts",
   "syscalls": [
     {
@@ -8,7 +9,7 @@
         "lstat", "poll", "lseek", "mmap", "mprotect", "munmap",
         "brk", "rt_sigaction", "rt_sigprocmask", "rt_sigreturn",
         "ioctl", "pread64", "pwrite64", "readv", "writev", "access",
-        "pipe", "select", "sched_yield", "mremap", "msync",
+        "pipe", "select", "sched_yield", "mremap", "msync", "madvise",
         "dup", "dup2", "nanosleep", "getpid", "sendfile",
         "socket", "connect", "accept", "sendto", "recvfrom",
         "sendmsg", "recvmsg", "shutdown", "bind", "listen",
@@ -37,11 +38,11 @@
         "fallocate", "timerfd_settime", "timerfd_gettime",
         "accept4", "signalfd4", "eventfd2", "epoll_create1",
         "dup3", "pipe2", "inotify_init1", "preadv", "pwritev",
-        "perf_event_open", "recvmmsg", "fanotify_init", "fanotify_mark",
+        "recvmmsg", "fanotify_init", "fanotify_mark",
         "prlimit64", "name_to_handle_at", "open_by_handle_at",
         "clock_adjtime", "syncfs", "sendmmsg", "setns", "getcpu",
-        "process_vm_readv", "process_vm_writev", "kcmp",
-        "finit_module", "sched_setattr", "sched_getattr",
+        "kcmp", "finit_module", "sched_setattr", "sched_getattr",
+        "sched_getaffinity", "sched_setaffinity",
         "renameat2", "seccomp", "getrandom", "memfd_create",
         "bpf", "execveat", "userfaultfd", "membarrier",
         "mlock2", "copy_file_range", "preadv2", "pwritev2",
@@ -52,10 +53,17 @@
       "action": "SCMP_ACT_ALLOW"
     },
     {
+      "comment": "Return ENOSYS for clone3 so glibc/musl fall back to clone",
+      "names": ["clone3"],
+      "action": "SCMP_ACT_ERRNO",
+      "errnoRet": 38
+    },
+    {
       "comment": "Explicitly BLOCK dangerous syscalls",
       "names": [
         "ptrace",
         "process_vm_readv",
+        "process_vm_writev",
         "mount",
         "pivot_root",
         "sethostname",
@@ -85,8 +93,8 @@
         "keyctl",
         "inotify_add_watch",
         "inotify_rm_watch",
-        "unshare",
         "perf_event_open",
+        "unshare",
         "settimeofday",
         "adjtimex",
         "clock_settime",
