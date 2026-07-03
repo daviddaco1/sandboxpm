@@ -12,7 +12,8 @@
   "bugs": "https://github.com/daviddaco1/sandboxpm/issues",
   "type": "module",
   "bin": {
-    "sandboxpm": "./dist/bin.js"
+    "sandboxpm": "./dist/bin.js",
+    "sbnpm": "./dist/bin.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
