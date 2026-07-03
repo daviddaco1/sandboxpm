@@ -394,6 +394,60 @@ describe('Linker._ensureSymlink — non-Windows platform', () => {
   })
 })
 
+describe('Linker._ensureSymlink / _linkBins — Windows platform', () => {
+  it('uses junction for directory symlinks, falls back to a .cmd shim on EPERM for bin files', async () => {
+    // Real dev machines that happen to run on Windows exercise this branch "for
+    // free" just by running the suite; Linux CI never does unless process.platform
+    // is stubbed here explicitly — without this test the win32 branch in
+    // _ensureSymlink/_linkBins is only ever covered on a Windows dev box.
+    const originalPlatform = process.platform
+    Object.defineProperty(process, 'platform', { value: 'win32' })
+    try {
+      const pkgJsonContent = JSON.stringify({
+        name: 'wincli', version: '1.0.0', bin: { wincli: './bin/cli.js' },
+      })
+      const { hash: pkgJsonHash } = await storeFile(pkgJsonContent)
+      const { hash: binHash } = await storeFile('#!/usr/bin/env node\nconsole.log("hi")')
+
+      const projectDir = path.join(tmpDir, 'project')
+      await fs.mkdir(projectDir)
+
+      const tree = makeTree({ packages: [{ name: 'wincli', version: '1.0.0' }] })
+      const fetchResults = makeFetchResults([{
+        name: 'wincli', version: '1.0.0',
+        files: [
+          { relativePath: 'package.json', hash: pkgJsonHash },
+          { relativePath: 'bin/cli.js', hash: binHash },
+        ],
+      }])
+
+      // The package-directory symlink (isDir:true → 'junction') should succeed
+      // normally; only the bin-file symlink (isDir:false → 'file') simulates the
+      // "no Developer Mode / not elevated" EPERM Windows throws for file symlinks.
+      const symlinkSpy = vi.spyOn(fs, 'symlink').mockImplementation(async (_target, _link, type) => {
+        if (type === 'file') {
+          const err = new Error('EPERM: operation not permitted') as NodeJS.ErrnoException
+          err.code = 'EPERM'
+          throw err
+        }
+      })
+
+      await linker.link(tree, fetchResults, { projectDir, includeDevDependencies: true })
+
+      const junctionCall = symlinkSpy.mock.calls.find(c => c[2] === 'junction')
+      const fileCall = symlinkSpy.mock.calls.find(c => c[2] === 'file')
+      expect(junctionCall).toBeDefined()
+      expect(fileCall).toBeDefined()
+
+      const shimPath = path.join(projectDir, 'node_modules', '.bin', 'wincli.cmd')
+      const shim = await fs.readFile(shimPath, 'utf8')
+      expect(shim).toContain('@node')
+    } finally {
+      Object.defineProperty(process, 'platform', { value: originalPlatform })
+    }
+  })
+})
+
 describe('Linker._linkBins — non-EPERM error propagation', () => {
   it('rethrows a bin symlink error that is not a Windows EPERM', async () => {
     const pkgJsonContent = JSON.stringify({

@@ -18,11 +18,21 @@ vi.mock('dockerode', () => ({ default: class FakeDockerode {} }))
 // afterEach — which only rewinds real mocks/spies — never resets it back to a no-op.
 let currentGlobalConfig: GlobalConfig = { storeDir: '', cacheDir: '', reportsDir: '' }
 
+// getHostPlatform() caches its result in a module-level variable computed from the
+// real process.platform — overridable here so the "host is not Linux" branch in
+// install()'s step 2b (fetching sandbox-platform optional deps) can be exercised
+// deterministically on any CI runner OS, not just when the dev machine happens to
+// be non-Linux. Defaults to passing through to the real implementation.
+let hostPlatformOverride: { os: string; cpu: string; libc?: string } | undefined
+
 vi.mock('@sandboxpm/config', async (importOriginal) => {
-  const original = await importOriginal() as Record<string, unknown>
+  const original = await importOriginal() as Record<string, unknown> & {
+    getHostPlatform: () => { os: string; cpu: string; libc?: string }
+  }
   return {
     ...original,
     loadGlobalConfig: async () => currentGlobalConfig,
+    getHostPlatform: () => hostPlatformOverride ?? original.getHostPlatform(),
   }
 })
 
@@ -35,6 +45,7 @@ beforeEach(async () => {
     cacheDir: path.join(tmpDir, 'cache'),
     reportsDir: path.join(tmpDir, 'reports'),
   }
+  hostPlatformOverride = undefined
 })
 
 afterEach(async () => {
@@ -206,6 +217,46 @@ describe('install — success path', () => {
     // Files actually landed in the CAS store
     const storeFiles = await fs.readdir(path.join(tmpDir, 'store'))
     expect(storeFiles.length).toBeGreaterThan(0)
+  })
+
+  it('fetches sandbox-platform optional deps for scripted packages when the host is not Linux', async () => {
+    // This block only runs when getHostPlatform() reports a non-Linux host — real
+    // on a Windows/macOS dev box, but never true on Linux CI unless stubbed here.
+    hostPlatformOverride = { os: 'darwin', cpu: 'x64' }
+
+    const { packuments, tarballs } = await setupRegistry(tmpDir, {
+      'pkg-with-script': { '1.0.0': { deps: {} } },
+      'esbuild-linux-x64': { '1.0.0': {} },
+    })
+    // setupRegistry always builds bare packuments with no scripts/optionalDependencies —
+    // patch in what this test actually needs.
+    packuments['pkg-with-script'].versions['1.0.0'].scripts = { postinstall: 'node install.js' }
+    packuments['pkg-with-script'].versions['1.0.0'].optionalDependencies = { 'esbuild-linux-x64': '1.0.0' }
+    packuments['esbuild-linux-x64'].versions['1.0.0'].os = ['linux']
+    packuments['esbuild-linux-x64'].versions['1.0.0'].cpu = ['x64']
+
+    installFetchMock(packuments, tarballs)
+    silenceOutput()
+
+    // Blacklist the scripted package so ScriptPrompt auto-skips it without ever
+    // touching SandboxRunner/Dockerode — this test is only about the optional-dep
+    // fetch loop in install()'s step 2b, not the script-approval flow.
+    const { saveRc, defaultRc } = await import('@sandboxpm/config')
+    const rc = defaultRc()
+    rc.blacklist = ['pkg-with-script']
+    await saveRc(tmpDir, rc)
+
+    await writePackageJson(tmpDir, { name: 'test-app', dependencies: { 'pkg-with-script': '^1.0.0' } })
+
+    const { install } = await import('./bin.js')
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
+    await install({ cwd: tmpDir })
+    expect(exitSpy).not.toHaveBeenCalled()
+
+    // The sandbox-platform dep was fetched even though the host (darwin) would
+    // normally filter it out of the main resolve/fetch pass.
+    const lockContent = JSON.parse(await fs.readFile(path.join(tmpDir, 'sandboxpm.lock'), 'utf8'))
+    expect(lockContent.packages['esbuild-linux-x64@1.0.0']).toBeDefined()
   })
 })
 
