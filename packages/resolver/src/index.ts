@@ -10,6 +10,9 @@ import * as path from 'path'
 import * as crypto from 'crypto'
 import * as semver from 'semver'
 import type { RegistryConfig } from '@sandboxpm/config'
+import { checkPackageRisk, type PackageRiskFinding } from './risk.js'
+
+export type { PackageRiskFinding }
 
 export interface DependencyRange {
   name: string
@@ -36,6 +39,8 @@ export interface ResolvedTree {
   packages: Map<string, ResolvedPackage>  // key: "name@version"
   directDeps: DependencyRange[]
   lockfileHash: string
+  /** Typosquat/low-trust findings from a live resolve(); always empty for resolveFromLock (no registry access). */
+  riskFindings: PackageRiskFinding[]
 }
 
 export interface Lockfile {
@@ -56,7 +61,10 @@ export interface LockfileEntry {
   libc?: string[]
 }
 
-// Minimal npm registry packument shape
+// Minimal npm registry packument shape. `time`/`maintainers` are optional
+// because most call sites don't need them, but the live registry response
+// always includes them — fetchPackument() doesn't strip fields, so risk.ts's
+// checkPackageRisk() gets them for free with no extra network call.
 interface PackumentVersion {
   name: string
   version: string
@@ -76,10 +84,14 @@ interface Packument {
   name: string
   versions: Record<string, PackumentVersion>
   'dist-tags': Record<string, string>
+  time?: Record<string, string>
+  maintainers?: { name: string }[]
 }
 
 export interface ResolverOptions {
   includeDev?: boolean
+  /** Package names exempted from typosquat/low-trust risk checks. */
+  trustedPackages?: string[]
 }
 
 const LOCKFILE_NAME = 'sandboxpm.lock'
@@ -172,6 +184,10 @@ export class Resolver {
     }))
     const visiting = new Set<string>() // prevent infinite loops
 
+    const riskFindings: PackageRiskFinding[] = []
+    const riskChecked = new Set<string>() // package names already risk-scanned this resolve
+    const trustedPackages = this.options.trustedPackages ?? []
+
     while (queue.length > 0) {
       const item = queue.shift()
       if (item === undefined) break
@@ -203,6 +219,12 @@ export class Resolver {
           continue
         }
         throw new Error(`No version of "${name}" satisfies range "${range}"`)
+      }
+
+      if (!riskChecked.has(name)) {
+        riskChecked.add(name)
+        const finding = checkPackageRisk(name, version, packument, trustedPackages)
+        if (finding) riskFindings.push(finding)
       }
 
       const key = `${name}@${version}`
@@ -312,6 +334,7 @@ export class Resolver {
       packages: resolved,
       directDeps,
       lockfileHash,
+      riskFindings,
     }
   }
 
@@ -371,6 +394,7 @@ export class Resolver {
       packages,
       directDeps,
       lockfileHash: crypto.createHash('sha256').update(content).digest('hex'),
+      riskFindings: [], // no registry access from a lockfile — nothing to risk-check against
     }
   }
 

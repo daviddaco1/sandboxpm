@@ -39,6 +39,41 @@ warnings and blocks are handled in CI (`abort`, `prompt`, or `continue`), and `w
 `blacklist` entries let you pre-approve or permanently ban specific packages — see
 [Configuration](/docs/configuration).
 
+## Typosquat & package-risk checks
+
+The install-script prompt only helps once a malicious package is already being installed. Before
+that, during dependency resolution, every package name is checked against a bundled snapshot of
+popular npm package names using edit-distance (so `lodahs`, `epxress`, or `expres5` all get
+caught as look-alikes of `lodash`/`express`). A name-similarity match is escalated to high
+severity when the matched package is also newly published (under 90 days old, or has very few
+released versions) or has a single maintainer — signals pulled from data the resolver already
+has in hand, with no extra network calls.
+
+```
+──────────────────────────────────────────────────────
+⚠  lodahs@1.0.0 looks risky
+──────────────────────────────────────────────────────
+  Severity: high
+  Reason:   typosquat:lodash(distance=1)
+  Reason:   new-package(12 days old)
+
+  Proceed with this package? [y/inspect/always/never]
+```
+
+`.sandboxpmrc`'s `policies.onPackageRisk` (`continue`/`prompt`/`abort`) controls this the same way
+`onWarn` controls the script prompt. `trustedPackages` exempts specific names from the check
+permanently (e.g. an internal fork); `blockedPackages` is a hard blocklist — any match aborts
+resolution before a single tarball is downloaded, and it applies even to installs from an
+existing `sandboxpm.lock`, since it's a pure name comparison. Manage both lists with
+`sandboxpm trust add/remove` and `sandboxpm block add/remove`, or edit `.sandboxpmrc` directly —
+see [Configuration](/docs/configuration).
+
+Known limits: there's no live CVE/advisory feed and no live npm download-count signal (both would
+require an ongoing external data dependency); the bundled popular-package list is a manually
+curated snapshot, not an automatically refreshed top-N export; and a lockfile-based install
+(`sandboxpm.lock` already fresh) skips the typosquat/low-trust scan entirely, since it never
+contacts the registry — only the `blockedPackages` hard blocklist still applies there.
+
 ## Content-addressable store
 
 Every file from every package is stored once in `~/.sandboxpm/store/`, keyed by its SHA-512 hash.

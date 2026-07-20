@@ -23,9 +23,10 @@ import { Fetcher } from '@sandboxpm/fetcher'
 import { Resolver } from '@sandboxpm/resolver'
 import type { ResolvedTree, ResolvedPackage, DependencyRange } from '@sandboxpm/resolver'
 import { Linker } from '@sandboxpm/linker'
-import { ScriptPrompt, SandboxRunner } from '@sandboxpm/scripts'
+import { ScriptPrompt, SandboxRunner, PackageRiskPrompt } from '@sandboxpm/scripts'
 import type { FetchResult } from '@sandboxpm/fetcher'
 import type { TaggedScript, ScriptRunResult } from '@sandboxpm/scripts'
+import type { PackageRiskResult } from '@sandboxpm/scripts'
 
 const PKG_VERSION = '0.1.0'
 
@@ -76,11 +77,12 @@ export async function install(flags: InstallFlags = {}): Promise<void> {
   const globalConfig = await loadGlobalConfig()
 
   const store = new CASStore(globalConfig.storeDir)
-  const resolver = new Resolver(rc.registries, { includeDev: !flags.prod })
+  const resolver = new Resolver(rc.registries, { includeDev: !flags.prod, trustedPackages: rc.trustedPackages })
   const fetcher = new Fetcher(store, rc.registries)
   const linker = new Linker(store)
   const runner = new SandboxRunner(new Dockerode(), rc, globalConfig.reportsDir)
   const scriptPrompt = new ScriptPrompt(rc, runner)
+  const riskPrompt = new PackageRiskPrompt(rc)
 
   // 1. Resolve — lockfile-first when available
   let spinner = ora('Resolving dependencies...').start()
@@ -123,6 +125,40 @@ export async function install(flags: InstallFlags = {}): Promise<void> {
   } catch (err) {
     spinner.fail(chalk.red(`Resolution failed: ${(err as Error).message}`))
     process.exit(1)
+  }
+
+  // 1b. Package trust/block check — runs before any tarball is downloaded.
+  // The blocklist applies to lockfile-based resolves too (pure name comparison,
+  // no registry access needed); typosquat/low-trust riskFindings only exist
+  // when tree came from a live resolver.resolve() call.
+  const blockedHit = [...tree.packages.values()].find(pkg => rc.blockedPackages.includes(pkg.name))
+  if (blockedHit) {
+    console.error(chalk.red(`✗ Install aborted: "${blockedHit.name}" is in policies.blockedPackages`))
+    process.exit(1)
+    return
+  }
+
+  if (tree.riskFindings.length > 0) {
+    let riskResults: PackageRiskResult[]
+    try {
+      riskResults = await riskPrompt.promptAll(tree.riskFindings)
+    } catch (err) {
+      console.error(chalk.red((err as Error).message))
+      process.exit(1)
+      return
+    }
+    await saveRc(cwd, rc)
+    for (const { finding, decision } of riskResults) {
+      try {
+        await fs.mkdir(globalConfig.reportsDir, { recursive: true })
+        await fs.writeFile(
+          path.join(globalConfig.reportsDir, `risk-${finding.name.replace(/\//g, '-')}-${Date.now()}.json`),
+          JSON.stringify({ ...finding, decision }, null, 2),
+        )
+      } catch {
+        // Non-fatal — audit trail is best-effort
+      }
+    }
   }
 
   // 2. Fetch
@@ -404,6 +440,58 @@ export async function whitelistRemove(pkg: string, flags: { cwd?: string }): Pro
   }
 }
 
+// ─── trust / block (package-level, distinct from the script whitelist/blacklist above) ─────
+
+export async function trustAdd(pkg: string, flags: { cwd?: string }): Promise<void> {
+  const cwd = flags.cwd ? path.resolve(flags.cwd) : process.cwd()
+  const rc = await loadRc(cwd)
+  if (!rc.trustedPackages.includes(pkg)) {
+    rc.trustedPackages.push(pkg)
+    await saveRc(cwd, rc)
+    console.log(chalk.green(`✓ Added ${pkg} to trustedPackages`))
+  } else {
+    console.log(chalk.gray(`${pkg} is already trusted`))
+  }
+}
+
+export async function trustRemove(pkg: string, flags: { cwd?: string }): Promise<void> {
+  const cwd = flags.cwd ? path.resolve(flags.cwd) : process.cwd()
+  const rc = await loadRc(cwd)
+  const idx = rc.trustedPackages.indexOf(pkg)
+  if (idx >= 0) {
+    rc.trustedPackages.splice(idx, 1)
+    await saveRc(cwd, rc)
+    console.log(chalk.green(`✓ Removed ${pkg} from trustedPackages`))
+  } else {
+    console.log(chalk.gray(`${pkg} is not trusted`))
+  }
+}
+
+export async function blockAdd(pkg: string, flags: { cwd?: string }): Promise<void> {
+  const cwd = flags.cwd ? path.resolve(flags.cwd) : process.cwd()
+  const rc = await loadRc(cwd)
+  if (!rc.blockedPackages.includes(pkg)) {
+    rc.blockedPackages.push(pkg)
+    await saveRc(cwd, rc)
+    console.log(chalk.green(`✓ Added ${pkg} to blockedPackages`))
+  } else {
+    console.log(chalk.gray(`${pkg} is already blocked`))
+  }
+}
+
+export async function blockRemove(pkg: string, flags: { cwd?: string }): Promise<void> {
+  const cwd = flags.cwd ? path.resolve(flags.cwd) : process.cwd()
+  const rc = await loadRc(cwd)
+  const idx = rc.blockedPackages.indexOf(pkg)
+  if (idx >= 0) {
+    rc.blockedPackages.splice(idx, 1)
+    await saveRc(cwd, rc)
+    console.log(chalk.green(`✓ Removed ${pkg} from blockedPackages`))
+  } else {
+    console.log(chalk.gray(`${pkg} is not blocked`))
+  }
+}
+
 // ─── cache ────────────────────────────────────────────────────────────────────
 
 export async function cacheClean(): Promise<void> {
@@ -484,8 +572,11 @@ async function auditReports(): Promise<void> {
     return
   }
 
-  console.log(chalk.cyan(`\n${files.length} script run(s):\n`))
-  for (const file of files.sort()) {
+  const scriptFiles = files.filter(f => !f.startsWith('risk-')).sort()
+  const riskFiles = files.filter(f => f.startsWith('risk-')).sort()
+
+  console.log(chalk.cyan(`\n${scriptFiles.length} script run(s):\n`))
+  for (const file of scriptFiles) {
     try {
       const r = JSON.parse(
         await fs.readFile(path.join(globalConfig.reportsDir, file), 'utf8')
@@ -505,6 +596,23 @@ async function auditReports(): Promise<void> {
       )
     } catch {
       // skip malformed report files
+    }
+  }
+
+  if (riskFiles.length > 0) {
+    console.log(chalk.cyan(`\n${riskFiles.length} package risk report(s):\n`))
+    for (const file of riskFiles) {
+      try {
+        const r = JSON.parse(
+          await fs.readFile(path.join(globalConfig.reportsDir, file), 'utf8')
+        ) as { name: string; version: string; reasons: string[]; severity: string; decision: string }
+        const severityIcon = r.severity === 'high' ? chalk.red('✗') : chalk.yellow('⚠')
+        console.log(
+          `${severityIcon} ${r.name}@${r.version} — ${r.severity} | decision=${r.decision} | ${r.reasons.join(', ')}`
+        )
+      } catch {
+        // skip malformed report files
+      }
     }
   }
 }
@@ -1417,6 +1525,38 @@ whitelist
   .action(async (pkg: string) => {
     const { cwd } = program.opts<{ cwd?: string }>()
     await whitelistRemove(pkg, cwd ? { cwd } : {})
+  })
+
+const trust = program.command('trust').description('Manage packages exempted from typosquat/risk checks')
+trust
+  .command('add <package>')
+  .description('Exempt a package from typosquat/low-trust risk checks')
+  .action(async (pkg: string) => {
+    const { cwd } = program.opts<{ cwd?: string }>()
+    await trustAdd(pkg, cwd ? { cwd } : {})
+  })
+trust
+  .command('remove <package>')
+  .description('Remove a package from the trusted list')
+  .action(async (pkg: string) => {
+    const { cwd } = program.opts<{ cwd?: string }>()
+    await trustRemove(pkg, cwd ? { cwd } : {})
+  })
+
+const block = program.command('block').description('Manage packages that always abort resolution')
+block
+  .command('add <package>')
+  .description('Always abort install if this package name appears in the resolved tree')
+  .action(async (pkg: string) => {
+    const { cwd } = program.opts<{ cwd?: string }>()
+    await blockAdd(pkg, cwd ? { cwd } : {})
+  })
+block
+  .command('remove <package>')
+  .description('Remove a package from the blocklist')
+  .action(async (pkg: string) => {
+    const { cwd } = program.opts<{ cwd?: string }>()
+    await blockRemove(pkg, cwd ? { cwd } : {})
   })
 
 const cache = program.command('cache').description('Manage the CAS store')

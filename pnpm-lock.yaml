@@ -158,6 +158,9 @@ importers:
       '@sandboxpm/fetcher':
         specifier: workspace:*
         version: link:../fetcher
+      '@sandboxpm/resolver':
+        specifier: workspace:*
+        version: link:../resolver
       chalk:
         specifier: ^5.3.0
         version: 5.6.2

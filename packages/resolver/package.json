@@ -15,7 +15,7 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "files": ["dist", "!dist/**/*.tsbuildinfo"],
+  "files": ["dist", "data", "!dist/**/*.tsbuildinfo"],
   "scripts": {
     "build": "tsc --build",
     "test": "vitest run"

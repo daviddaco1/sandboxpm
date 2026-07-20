@@ -43,6 +43,15 @@ command exposed by the `sandboxpm` binary.
 | `sandboxpm whitelist add <package>` | Trust a package's scripts permanently |
 | `sandboxpm whitelist remove <package>` | Remove a package from the whitelist |
 
+## Package trust/block (typosquat & risk checks)
+
+| Command | Description |
+|---|---|
+| `sandboxpm trust add <package>` | Exempt a package from typosquat/low-trust risk checks |
+| `sandboxpm trust remove <package>` | Remove a package from the trusted list |
+| `sandboxpm block add <package>` | Always abort install if this package name is resolved |
+| `sandboxpm block remove <package>` | Remove a package from the blocklist |
+
 ## Store & config
 
 | Command | Description |

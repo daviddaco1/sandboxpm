@@ -17,6 +17,9 @@ import type { PackageScript } from '@sandboxpm/fetcher'
 import type { SandboxpmRc } from '@sandboxpm/config'
 import { parseStraceLog } from './trace-parser.js'
 
+export { PackageRiskPrompt } from './risk-prompt.js'
+export type { PackageRiskDecision, PackageRiskResult } from './risk-prompt.js'
+
 export type ScriptDecision =
   | 'run'
   | 'skip'
