@@ -1,6 +1,6 @@
 {
   "name": "sandboxpm",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "A security-first, zero-trust package manager for Node.js — never runs install scripts without consent.",
   "license": "MIT",
   "repository": {

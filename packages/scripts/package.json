@@ -1,6 +1,6 @@
 {
   "name": "@sandboxpm/scripts",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Interactive install-script approval and Docker/Hyper-V sandbox runner for sandboxpm",
   "license": "MIT",
   "repository": {
@@ -15,7 +15,11 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "files": ["dist", "assets", "!dist/**/*.tsbuildinfo"],
+  "files": [
+    "dist",
+    "assets",
+    "!dist/**/*.tsbuildinfo"
+  ],
   "scripts": {
     "build": "tsc --build",
     "test": "vitest run"

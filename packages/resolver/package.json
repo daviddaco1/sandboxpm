@@ -1,6 +1,6 @@
 {
   "name": "@sandboxpm/resolver",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Semver dependency resolution and lockfile generation for sandboxpm",
   "license": "MIT",
   "repository": {
@@ -15,7 +15,11 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "files": ["dist", "data", "!dist/**/*.tsbuildinfo"],
+  "files": [
+    "dist",
+    "data",
+    "!dist/**/*.tsbuildinfo"
+  ],
   "scripts": {
     "build": "tsc --build",
     "test": "vitest run"
