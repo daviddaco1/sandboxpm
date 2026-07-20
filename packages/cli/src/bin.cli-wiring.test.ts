@@ -159,6 +159,35 @@ describe('audit (CLI dispatch)', () => {
     expect(output).toContain('left-pad@1.3.0')
     expect(output).toContain('bad-pkg@1.0.0')
   })
+
+  it('reports risk-*.json files separately without breaking the script-run count', async () => {
+    const reportsDir = globalConfigState.current.reportsDir
+    await fs.mkdir(reportsDir, { recursive: true })
+
+    await fs.writeFile(path.join(reportsDir, 'a-good.json'), JSON.stringify({
+      packageId: 'left-pad@1.3.0',
+      lifecycle: 'postinstall',
+      decision: 'run',
+      exitCode: 0,
+      sandboxReport: { status: 'clean', audited: true, unexpectedActivity: [] },
+    }))
+    await fs.writeFile(path.join(reportsDir, 'risk-lodahs-1700000000000.json'), JSON.stringify({
+      name: 'lodahs',
+      version: '1.0.0',
+      reasons: ['typosquat:lodash(distance=1)', 'new-package(few published versions)'],
+      severity: 'high',
+      decision: 'trust',
+    }))
+
+    const logSpy = vi.spyOn(console, 'log')
+    await run(['audit'])
+    const output = logSpy.mock.calls.map(c => c.join(' ')).join('\n')
+
+    expect(output).toContain('1 script run') // risk report is excluded from the script-run count
+    expect(output).toContain('1 package risk report')
+    expect(output).toContain('lodahs@1.0.0')
+    expect(output).toContain('typosquat:lodash')
+  })
 })
 
 // ─── config get / config set ────────────────────────────────────────────────────
@@ -235,6 +264,24 @@ describe('trivial dispatcher wrappers (CLI dispatch)', () => {
 
     await run(['whitelist', 'remove', 'trusted-pkg', '--cwd', tmpDir])
     expect((await loadRc(tmpDir)).whitelist).not.toContain('trusted-pkg')
+  })
+
+  it('trust add then trust remove round-trip', async () => {
+    await run(['trust', 'add', 'some-lib', '--cwd', tmpDir])
+    const { loadRc } = await import('@sandboxpm/config')
+    expect((await loadRc(tmpDir)).trustedPackages).toContain('some-lib')
+
+    await run(['trust', 'remove', 'some-lib', '--cwd', tmpDir])
+    expect((await loadRc(tmpDir)).trustedPackages).not.toContain('some-lib')
+  })
+
+  it('block add then block remove round-trip', async () => {
+    await run(['block', 'add', 'known-bad', '--cwd', tmpDir])
+    const { loadRc } = await import('@sandboxpm/config')
+    expect((await loadRc(tmpDir)).blockedPackages).toContain('known-bad')
+
+    await run(['block', 'remove', 'known-bad', '--cwd', tmpDir])
+    expect((await loadRc(tmpDir)).blockedPackages).not.toContain('known-bad')
   })
 
   it('ls exits(1) cleanly when there is no sandboxpm.lock', async () => {

@@ -35,6 +35,13 @@ policies:
   #   prompt — ask the developer interactively
   onBlock: abort
 
+  # What to do when a resolved package looks like a typosquat of a popular
+  # package, or is a name-similar package that's also new/low-maintainer-count:
+  #   continue — log a warning and keep going
+  #   prompt   — ask the developer interactively (default)
+  #   abort    — treat any flagged package as a fatal error
+  onPackageRisk: prompt
+
   # Extra directories containing OPA policy files (.rego) to evaluate.
   extraPolicyDirs: []
 
@@ -54,6 +61,22 @@ whitelist:
 # Packages whose install scripts are always blocked without prompting.
 blacklist:
   # - some-suspicious-package
+
+# ─── Package trust/block lists ───────────────────────────────────────────────
+# These govern whether a resolved PACKAGE ITSELF is flagged/installed at all —
+# distinct from whitelist/blacklist above, which only govern SCRIPT execution
+# for a package sandboxpm has already decided to install.
+
+# Packages exempted from the typosquat/low-trust risk check (e.g. an internal
+# fork or a legitimately new/small package you've verified yourself).
+trustedPackages:
+  # - my-internal-fork-of-lodash
+
+# Packages that always abort resolution outright — e.g. a name confirmed
+# malicious by a security advisory. Checked before any tarball is downloaded,
+# for both fresh resolves and lockfile-based installs.
+blockedPackages:
+  # - known-malicious-package
 
 # ─── Environment passthrough ─────────────────────────────────────────────────
 # Names of environment variables (NOT values) to pass into the sandbox.

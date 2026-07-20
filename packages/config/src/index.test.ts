@@ -33,6 +33,9 @@ describe('defaultRc', () => {
     expect(rc.cache.enabled).toBe(true)
     expect(rc.whitelist).toEqual([])
     expect(rc.blacklist).toEqual([])
+    expect(rc.trustedPackages).toEqual([])
+    expect(rc.blockedPackages).toEqual([])
+    expect(rc.policies.onPackageRisk).toBe('prompt')
   })
 })
 
@@ -58,6 +61,19 @@ describe('mergeRc', () => {
     const custom = [{ url: 'https://custom.registry.io' }]
     const result = mergeRc(base, { registries: custom })
     expect(result.registries).toEqual(custom)
+  })
+
+  it('merges policies.onPackageRisk overrides', () => {
+    const base = defaultRc()
+    const result = mergeRc(base, { policies: { onWarn: 'prompt', onBlock: 'abort', onPackageRisk: 'abort', extraPolicyDirs: [] } })
+    expect(result.policies.onPackageRisk).toBe('abort')
+  })
+
+  it('overrides trustedPackages and blockedPackages arrays entirely', () => {
+    const base = defaultRc()
+    const result = mergeRc(base, { trustedPackages: ['ok-pkg'], blockedPackages: ['bad-pkg'] })
+    expect(result.trustedPackages).toEqual(['ok-pkg'])
+    expect(result.blockedPackages).toEqual(['bad-pkg'])
   })
 })
 
@@ -128,6 +144,20 @@ sandbox:
     const rcContent = `policies:\n  onBlock: "nope"\n`
     await fs.writeFile(path.join(tmpDir, '.sandboxpmrc'), rcContent)
     await expect(loadRc(tmpDir)).rejects.toThrow(/onBlock/)
+  })
+
+  it('throws on invalid policies.onPackageRisk', async () => {
+    const rcContent = `policies:\n  onPackageRisk: "nope"\n`
+    await fs.writeFile(path.join(tmpDir, '.sandboxpmrc'), rcContent)
+    await expect(loadRc(tmpDir)).rejects.toThrow(/onPackageRisk/)
+  })
+
+  it('loads trustedPackages and blockedPackages from file', async () => {
+    const rcContent = `trustedPackages:\n  - "some-lib"\nblockedPackages:\n  - "known-bad"\n`
+    await fs.writeFile(path.join(tmpDir, '.sandboxpmrc'), rcContent)
+    const rc = await loadRc(tmpDir)
+    expect(rc.trustedPackages).toEqual(['some-lib'])
+    expect(rc.blockedPackages).toEqual(['known-bad'])
   })
 })
 

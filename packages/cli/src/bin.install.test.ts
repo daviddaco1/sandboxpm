@@ -455,6 +455,88 @@ describe('update — without --latest', () => {
   })
 })
 
+// ─── 9. install() — package risk / blocklist ────────────────────────────────────
+
+describe('install — package risk / blocklist', () => {
+  it('aborts before any tarball download when a resolved package is in blockedPackages', async () => {
+    const { packuments, tarballs } = await setupRegistry(tmpDir, { 'pkg-a': { '1.0.0': {} } })
+    const fetchMock = installFetchMock(packuments, tarballs)
+    silenceOutput()
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
+
+    const { saveRc, defaultRc } = await import('@sandboxpm/config')
+    const rc = defaultRc()
+    rc.blockedPackages = ['pkg-a']
+    await saveRc(tmpDir, rc)
+
+    await writePackageJson(tmpDir, { name: 'test-app', dependencies: { 'pkg-a': '^1.0.0' } })
+
+    const { install } = await import('./bin.js')
+    await install({ cwd: tmpDir }).catch(() => {})
+
+    expect(exitSpy).toHaveBeenCalledWith(1)
+    // No tarball was ever downloaded for the blocked package
+    const tarballCalls = fetchMock.mock.calls.filter(([reqUrl]) => String(reqUrl).endsWith('.tgz'))
+    expect(tarballCalls).toHaveLength(0)
+    await expect(fs.access(path.join(tmpDir, 'node_modules', 'pkg-a'))).rejects.toThrow()
+  })
+
+  it('auto-continues past a typosquat-shaped dependency and writes a risk audit report when onPackageRisk is "continue"', async () => {
+    // Interactive prompting itself is covered in isolation by
+    // packages/scripts/src/risk-prompt.test.ts (mocking `inquirer` across the
+    // cli -> scripts package boundary isn't reliable under pnpm's per-package
+    // symlinked node_modules); this test exercises install()'s wiring instead —
+    // the non-interactive "continue" policy path, plus the audit report write.
+    const { packuments, tarballs } = await setupRegistry(tmpDir, { lodahs: { '1.0.0': {} } })
+    installFetchMock(packuments, tarballs)
+    silenceOutput()
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
+
+    const { saveRc, defaultRc } = await import('@sandboxpm/config')
+    const rc = defaultRc()
+    rc.policies.onPackageRisk = 'continue'
+    await saveRc(tmpDir, rc)
+
+    await writePackageJson(tmpDir, { name: 'test-app', dependencies: { lodahs: '^1.0.0' } })
+
+    const { install } = await import('./bin.js')
+    await install({ cwd: tmpDir })
+
+    expect(exitSpy).not.toHaveBeenCalled()
+    await expect(fs.access(path.join(tmpDir, 'node_modules', 'lodahs'))).resolves.toBeUndefined()
+
+    const reportFiles = await fs.readdir(currentGlobalConfig.reportsDir)
+    const riskReport = reportFiles.find(f => f.startsWith('risk-lodahs-'))
+    expect(riskReport).toBeDefined()
+    const reportContent = JSON.parse(
+      await fs.readFile(path.join(currentGlobalConfig.reportsDir, riskReport as string), 'utf8')
+    )
+    expect(reportContent.decision).toBe('continue')
+    expect(reportContent.reasons[0]).toContain('typosquat:lodash')
+  })
+
+  it('aborts without downloading when onPackageRisk is "abort"', async () => {
+    const { packuments, tarballs } = await setupRegistry(tmpDir, { lodahs: { '1.0.0': {} } })
+    const fetchMock = installFetchMock(packuments, tarballs)
+    silenceOutput()
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
+
+    const { saveRc, defaultRc } = await import('@sandboxpm/config')
+    const rc = defaultRc()
+    rc.policies.onPackageRisk = 'abort'
+    await saveRc(tmpDir, rc)
+
+    await writePackageJson(tmpDir, { name: 'test-app', dependencies: { lodahs: '^1.0.0' } })
+
+    const { install } = await import('./bin.js')
+    await install({ cwd: tmpDir }).catch(() => {})
+
+    expect(exitSpy).toHaveBeenCalledWith(1)
+    const tarballCalls = fetchMock.mock.calls.filter(([reqUrl]) => String(reqUrl).endsWith('.tgz'))
+    expect(tarballCalls).toHaveLength(0)
+  })
+})
+
 // ─── 8. update() — with --latest ────────────────────────────────────────────────
 
 describe('update — with --latest', () => {

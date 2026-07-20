@@ -22,6 +22,7 @@ export interface SandboxConfig {
 export interface PoliciesConfig {
   onWarn: 'continue' | 'prompt' | 'abort'
   onBlock: 'abort' | 'prompt'
+  onPackageRisk: 'continue' | 'prompt' | 'abort'
   extraPolicyDirs: string[]
 }
 
@@ -43,6 +44,8 @@ export interface SandboxpmRc {
   registries: RegistryConfig[]
   whitelist: string[]   // packages whose scripts are always allowed
   blacklist: string[]   // packages whose scripts are always blocked
+  trustedPackages: string[]  // packages exempted from typosquat/low-trust risk checks
+  blockedPackages: string[]  // packages that always abort resolution (known-malicious)
   envPassthrough: string[]  // env var names to pass into sandbox (non-sensitive only)
   cache: CacheConfig
 }
@@ -66,6 +69,7 @@ export function defaultRc(): SandboxpmRc {
     policies: {
       onWarn: 'prompt',
       onBlock: 'abort',
+      onPackageRisk: 'prompt',
       extraPolicyDirs: [],
     },
     registries: [
@@ -73,6 +77,8 @@ export function defaultRc(): SandboxpmRc {
     ],
     whitelist: [],
     blacklist: [],
+    trustedPackages: [],
+    blockedPackages: [],
     envPassthrough: [],
     cache: {
       enabled: true,
@@ -124,6 +130,11 @@ function validateRc(raw: unknown, filePath: string): SandboxpmRc {
         `Invalid .sandboxpmrc at ${filePath}: "policies.onBlock" must be one of ${validOnBlock.join(', ')}`
       )
     }
+    if ('onPackageRisk' in p && !validOnWarn.includes(p['onPackageRisk'] as string)) {
+      throw new Error(
+        `Invalid .sandboxpmrc at ${filePath}: "policies.onPackageRisk" must be one of ${validOnWarn.join(', ')}`
+      )
+    }
   }
 
   return mergeRc(defaultRc(), obj as Partial<SandboxpmRc>)
@@ -141,6 +152,8 @@ export function mergeRc(base: SandboxpmRc, overrides: Partial<SandboxpmRc>): San
     registries: overrides.registries ?? base.registries,
     whitelist: overrides.whitelist ?? base.whitelist,
     blacklist: overrides.blacklist ?? base.blacklist,
+    trustedPackages: overrides.trustedPackages ?? base.trustedPackages,
+    blockedPackages: overrides.blockedPackages ?? base.blockedPackages,
     envPassthrough: overrides.envPassthrough ?? base.envPassthrough,
     cache: overrides.cache != null
       ? { ...base.cache, ...overrides.cache }

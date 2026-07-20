@@ -98,6 +98,62 @@ describe('whitelistAdd / whitelistRemove', () => {
   })
 })
 
+// ─── trust / block ──────────────────────────────────────────────────────────────
+
+describe('trustAdd / trustRemove', () => {
+  it('adds a package to trustedPackages', async () => {
+    const { trustAdd } = await import('./bin.js')
+    const { saveRc, defaultRc } = await import('@sandboxpm/config')
+    await saveRc(tmpDir, defaultRc())
+
+    await trustAdd('some-lib', { cwd: tmpDir })
+
+    const { loadRc } = await import('@sandboxpm/config')
+    const rc = await loadRc(tmpDir)
+    expect(rc.trustedPackages).toContain('some-lib')
+  })
+
+  it('removes a package from trustedPackages', async () => {
+    const { trustAdd, trustRemove } = await import('./bin.js')
+    const { saveRc, defaultRc } = await import('@sandboxpm/config')
+    await saveRc(tmpDir, defaultRc())
+
+    await trustAdd('remove-me', { cwd: tmpDir })
+    await trustRemove('remove-me', { cwd: tmpDir })
+
+    const { loadRc } = await import('@sandboxpm/config')
+    const rc = await loadRc(tmpDir)
+    expect(rc.trustedPackages).not.toContain('remove-me')
+  })
+})
+
+describe('blockAdd / blockRemove', () => {
+  it('adds a package to blockedPackages', async () => {
+    const { blockAdd } = await import('./bin.js')
+    const { saveRc, defaultRc } = await import('@sandboxpm/config')
+    await saveRc(tmpDir, defaultRc())
+
+    await blockAdd('known-bad', { cwd: tmpDir })
+
+    const { loadRc } = await import('@sandboxpm/config')
+    const rc = await loadRc(tmpDir)
+    expect(rc.blockedPackages).toContain('known-bad')
+  })
+
+  it('removes a package from blockedPackages', async () => {
+    const { blockAdd, blockRemove } = await import('./bin.js')
+    const { saveRc, defaultRc } = await import('@sandboxpm/config')
+    await saveRc(tmpDir, defaultRc())
+
+    await blockAdd('remove-me', { cwd: tmpDir })
+    await blockRemove('remove-me', { cwd: tmpDir })
+
+    const { loadRc } = await import('@sandboxpm/config')
+    const rc = await loadRc(tmpDir)
+    expect(rc.blockedPackages).not.toContain('remove-me')
+  })
+})
+
 // ─── listPackages ─────────────────────────────────────────────────────────────
 
 describe('listPackages', () => {

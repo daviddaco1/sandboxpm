@@ -612,4 +612,79 @@ describe('Resolver.resolveFromLock', () => {
     expect(tree.packages.has('express@4.18.2')).toBe(true)
     expect(tree.packages.get('express@4.18.2')?.version).toBe('4.18.2')
   })
+
+  it('always returns an empty riskFindings array — no registry access means nothing to risk-check', async () => {
+    const lockfile = {
+      lockfileVersion: 1,
+      sandboxpmVersion: '0.1.0',
+      packages: {
+        'lodahs@1.0.0': { // even a typosquat-looking name in the lockfile isn't flagged
+          resolved: 'https://registry.npmjs.org/lodahs/-/lodahs-1.0.0.tgz',
+          integrity: 'sha512-abc==',
+          dependencies: {},
+        },
+      },
+    }
+    const lockPath = path.join(tmpDir, 'sandboxpm.lock')
+    await fs.writeFile(lockPath, JSON.stringify(lockfile))
+
+    const resolver = new Resolver()
+    const tree = await resolver.resolveFromLock(lockPath)
+
+    expect(tree.riskFindings).toEqual([])
+  })
+})
+
+describe('Resolver.resolve — package risk findings', () => {
+  it('flags a typosquat-adjacent transitive dependency in riskFindings', async () => {
+    const RISK_REGISTRY = {
+      ...REGISTRY,
+      lodahs: makePackument('lodahs', { '1.0.0': { deps: {} } }),
+    }
+    vi.spyOn(global, 'fetch' as keyof typeof global).mockImplementation(async (url) => {
+      const name = String(url).replace('https://registry.npmjs.org/', '')
+      const packument = RISK_REGISTRY[name as keyof typeof RISK_REGISTRY]
+      if (!packument) return { ok: false, status: 404, statusText: 'Not Found', json: async () => ({}) } as Response
+      return { ok: true, status: 200, json: async () => packument } as Response
+    })
+
+    await writePackageJson(tmpDir, { dependencies: { lodahs: '^1.0.0' } })
+
+    const resolver = new Resolver()
+    const tree = await resolver.resolve(tmpDir)
+
+    expect(tree.riskFindings).toHaveLength(1)
+    expect(tree.riskFindings[0]?.name).toBe('lodahs')
+    expect(tree.riskFindings[0]?.reasons[0]).toContain('typosquat:lodash')
+  })
+
+  it('does not flag a trusted package even if it matches a typosquat pattern', async () => {
+    const RISK_REGISTRY = {
+      ...REGISTRY,
+      lodahs: makePackument('lodahs', { '1.0.0': { deps: {} } }),
+    }
+    vi.spyOn(global, 'fetch' as keyof typeof global).mockImplementation(async (url) => {
+      const name = String(url).replace('https://registry.npmjs.org/', '')
+      const packument = RISK_REGISTRY[name as keyof typeof RISK_REGISTRY]
+      if (!packument) return { ok: false, status: 404, statusText: 'Not Found', json: async () => ({}) } as Response
+      return { ok: true, status: 200, json: async () => packument } as Response
+    })
+
+    await writePackageJson(tmpDir, { dependencies: { lodahs: '^1.0.0' } })
+
+    const resolver = new Resolver([], { trustedPackages: ['lodahs'] })
+    const tree = await resolver.resolve(tmpDir)
+
+    expect(tree.riskFindings).toEqual([])
+  })
+
+  it('does not flag ordinary, well-known dependencies', async () => {
+    mockRegistry()
+    await writePackageJson(tmpDir, { dependencies: { express: '^4.0.0' } })
+
+    const resolver = new Resolver()
+    const tree = await resolver.resolve(tmpDir)
+
+    expect(tree.riskFindings).toEqual([])
+  })
 })

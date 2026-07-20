@@ -44,6 +44,13 @@ policies:
   #   prompt — ask the developer interactively
   onBlock: abort
 
+  # What to do when a resolved package looks like a typosquat of a popular
+  # package (see "Package trust/block lists" below):
+  #   continue — log a warning and keep going
+  #   prompt   — ask the developer interactively (default)
+  #   abort    — treat any flagged package as a fatal error
+  onPackageRisk: prompt
+
   # Extra directories containing OPA policy files (.rego) to evaluate.
   extraPolicyDirs: []
 ```
@@ -73,6 +80,25 @@ blacklist:
 
 Interactive decisions made during `sandboxpm install` can persist back into these lists — you're
 never asked about the same package twice unless you want to be.
+
+## Package trust/block lists
+
+```yaml
+# Packages exempted from the typosquat/low-trust risk check.
+trustedPackages:
+  # - my-internal-fork-of-lodash
+
+# Packages that always abort resolution outright, before any tarball is
+# downloaded — applies even to installs from an existing sandboxpm.lock.
+blockedPackages:
+  # - known-malicious-package
+```
+
+These are distinct from `whitelist`/`blacklist` above: those govern whether a package's *scripts*
+run once sandboxpm has decided to install it, while `trustedPackages`/`blockedPackages` govern
+whether the *package itself* is flagged or installed at all. Manage them with
+`sandboxpm trust add/remove` and `sandboxpm block add/remove` — see
+[Security model](/docs/security) for how the risk check works.
 
 ## Environment passthrough
 

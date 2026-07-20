@@ -23,6 +23,7 @@
   "dependencies": {
     "@sandboxpm/config": "workspace:*",
     "@sandboxpm/fetcher": "workspace:*",
+    "@sandboxpm/resolver": "workspace:*",
     "chalk": "^5.3.0",
     "dockerode": "^4.0.0",
     "inquirer": "^9.0.0",
