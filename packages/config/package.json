@@ -1,6 +1,6 @@
 {
   "name": "@sandboxpm/config",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Loads and merges .sandboxpmrc config files for sandboxpm",
   "license": "MIT",
   "repository": {
@@ -24,7 +24,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "js-yaml": "^4.1.0"
+    "js-yaml": "^4.3.1"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9"

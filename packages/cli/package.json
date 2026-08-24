@@ -1,6 +1,6 @@
 {
   "name": "sandboxpm",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "A security-first, zero-trust package manager for Node.js — never runs install scripts without consent.",
   "license": "MIT",
   "repository": {
@@ -31,22 +31,22 @@
   },
   "dependencies": {
     "@sandboxpm/config": "workspace:*",
-    "@sandboxpm/store": "workspace:*",
     "@sandboxpm/fetcher": "workspace:*",
-    "@sandboxpm/resolver": "workspace:*",
     "@sandboxpm/linker": "workspace:*",
+    "@sandboxpm/resolver": "workspace:*",
     "@sandboxpm/scripts": "workspace:*",
-    "chalk": "^5.3.0",
-    "commander": "^12.0.0",
-    "dockerode": "^4.0.0",
-    "ora": "^8.0.0",
-    "pino": "^9.0.0",
-    "pino-pretty": "^11.0.0",
-    "semver": "^7.6.0"
+    "@sandboxpm/store": "workspace:*",
+    "chalk": "^5.6.2",
+    "commander": "^12.1.0",
+    "dockerode": "^4.0.12",
+    "ora": "^8.2.0",
+    "pino": "^9.14.0",
+    "pino-pretty": "^11.3.0",
+    "semver": "^7.8.5"
   },
   "devDependencies": {
-    "@types/dockerode": "^3.3.29",
-    "@types/pino": "^7.0.0",
-    "@types/semver": "^7.5.8"
+    "@types/dockerode": "^3.3.47",
+    "@types/pino": "^7.0.5",
+    "@types/semver": "^7.8.0"
   }
 }
