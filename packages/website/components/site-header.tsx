@@ -7,6 +7,7 @@ const NAV_LINKS = [
   { href: '/docs/installation', label: 'Docs' },
   { href: '/docs/cli', label: 'CLI' },
   { href: '/docs/security', label: 'Security' },
+  { href: '/changelog', label: 'Changelog' },
 ]
 
 export function SiteHeader(): React.JSX.Element {

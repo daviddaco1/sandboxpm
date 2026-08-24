@@ -1,0 +1,63 @@
+export const metadata = {
+  title: 'Changelog — sandboxpm',
+}
+
+# Changelog
+
+Notable changes to sandboxpm, release by release. Versions follow
+[Semantic Versioning](https://semver.org/). The full log lives in
+[`CHANGELOG.md`](https://github.com/daviddaco1/sandboxpm/blob/main/CHANGELOG.md).
+
+## 0.1.3 — 2026-08-24
+
+**Security**
+
+- `next` bumped to 15.5.23, fixing several issues including an SSRF via
+  `rewrites` and a Server Actions DoS in the App Router.
+- `js-yaml` bumped to 4.3.1, fixing quadratic CPU consumption during YAML
+  parsing.
+- `tar` bumped to 7.5.22, fixing an uncontrolled-recursion DoS via crafted
+  long-path tarballs.
+- `postcss` bumped to 8.5.26, fixing path traversal in source-map auto-loading.
+- `sharp` and `protobufjs` pinned to patched versions via workspace overrides.
+- All open Dependabot security alerts resolved; `pnpm audit` is clean.
+
+**Changed**
+
+- Routine dependency maintenance across the workspace.
+- CI: updated pinned action SHAs for `actions/checkout`, `actions/setup-node`,
+  and `pnpm/action-setup`.
+
+## 0.1.2 — 2026-07-20
+
+**Added**
+
+- Package-risk and typosquat detection during dependency resolution, with an
+  interactive prompt to trust or block flagged packages.
+
+**Changed**
+
+- CI now runs the end-to-end suite only on pushes to `main`.
+
+## 0.1.1 — 2026-07-03
+
+**Added**
+
+- This documentation site, and `LICENSE` files for every package.
+
+**Changed**
+
+- Raised the minimum supported Node.js version to 22.
+- Improved Windows symlink fallback handling in the linker.
+
+**Security**
+
+- Dependency fixes for `postcss`, `uuid`, and `protobufjs`.
+
+## 0.1.0 — 2026-06-08
+
+**Added**
+
+- Initial release: content-addressable store, resolver, fetcher, linker,
+  script-consent prompts, Docker/Hyper-V sandbox runner, and the `sandboxpm`
+  CLI.
